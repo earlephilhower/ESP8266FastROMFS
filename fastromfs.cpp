@@ -30,7 +30,7 @@ typedef struct {
 typedef struct {
 	uint64_t magic;
 	uint64_t epoch; // If you roll over this, well, you're amazing
-	uint16_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
+	uint8_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
 	FileEntry fileEntry[ FILEENTRIES ];
 	uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
 } FilesystemInFlash;
@@ -149,12 +149,32 @@ printf("unlink('%s')\n", name);
 
 int Filesystem::GetFAT(int idx)
 {
-	return fs.fat[idx];
+	int bo = (idx/2) * 3;
+	int ret;
+	if (idx & 1) {
+		ret = fs.fat[bo+1] & 0x0f;
+		ret <<= 8;
+		ret |= fs.fat[bo+2];
+	} else {
+		ret = fs.fat[bo+1] & 0xf0;
+		ret <<= 4;
+		ret |= fs.fat[bo];
+	}
+	return ret;
 }
 
 void Filesystem::SetFAT(int idx, int val)
 {
-	fs.fat[idx] = val;
+	int bo = (idx/2) * 3;
+	if (idx & 1) {
+		fs.fat[bo+1] &= ~0x0f;
+		fs.fat[bo+1] |= (val>>8) & 0x0f;
+		fs.fat[bo+2] = val & 0xff;
+	} else {
+		fs.fat[bo+1] &= ~0xf0;
+		fs.fat[bo+1] |= (val>>4) & 0xf0;
+		fs.fat[bo] = val & 0xff;
+	}
 }
 
 int Filesystem::FindFreeSector()
