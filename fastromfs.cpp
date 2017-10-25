@@ -10,9 +10,10 @@
 #define FSSIZEMB 3
 #define FATENTRIES (FSSIZEMB * 1024 * 1024 / 4096)
 #define FATBYTES ((FATENTRIES * 12) / 8)
-#define FILEENTRIES ((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry))
+#define FILEENTRIES ((int)((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry)))
 #define FATEOF 0xfff
 #define FATCOPIES 8
+#define NAMELEN 24
 
 #ifndef min
 	#define min(a,b) (((a)>(b))?(b):(a))
@@ -22,18 +23,28 @@
 #endif
 
 typedef struct {
-	char name[24]; // Not necessarialy 0-terminated, beware!
-	uint32_t fat; // Index to first FAT block. Only need 16 bits, but easiest to ensure alignment @32
-	uint32_t len; // Can be 0 if file just created with no writes
+	char name[NAMELEN]; // Not necessarialy 0-terminated, beware!
+	int32_t fat; // Index to first FAT block. Only need 16 bits, but easiest to ensure alignment @32
+	int32_t len; // Can be 0 if file just created with no writes
 } FileEntry;
 
-typedef struct {
-	uint64_t magic;
-	uint64_t epoch; // If you roll over this, well, you're amazing
-	uint8_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
-	FileEntry fileEntry[ FILEENTRIES ];
-	uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
+typedef union {
+	uint8_t filler[SECTORSIZE]; // Ensure we take 1 full sector in RAM
+	struct {
+		uint64_t magic;
+		int64_t epoch; // If you roll over this, well, you're amazing
+		uint8_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
+		FileEntry fileEntry[ FILEENTRIES ];
+		uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
+	};
 } FilesystemInFlash;
+
+typedef void Dir; // Opaque for the masses
+
+struct dirent {
+	int off;
+	char name[NAMELEN + 1]; // Ensure space for \0
+};
 
 class File;
 
@@ -43,11 +54,17 @@ friend File;
 public:
 	Filesystem();
 	~Filesystem();
-	bool Format();
-	bool Mount();
-	bool Unmount();
+	bool mkfs();
+	bool mount();
+	bool umount();
 	File *open(const char *name, const char *mode);
 	bool unlink(const char *name);
+	int available();
+	int fsize(const char *name);
+	Dir *opendir(const char *ignored) { return opendir(); };
+	Dir *opendir();
+	struct dirent *readdir(Dir *dir);
+	int closedir(Dir *dir);
 
 	void DumpFS();
 	void DumpSector(int sector);
@@ -57,7 +74,6 @@ protected:
 	void SetFAT(int idx, int val);
 	bool EraseSector(int sector);
 	bool WriteSector(int sector, const void *data);
-	bool WritePartialSector(int sector, int offset, const void *dest, int len);
 	bool ReadSector(int sector, void *data);
 	bool ReadPartialSector(int sector, int offset, void *dest, int len);
 	int FindFreeSector();
@@ -65,15 +81,68 @@ protected:
 	int FindFileEntryByName(const char *name);
 	int CreateNewFileEntry(const char *name);
 	FileEntry *GetFileEntry(int idx);
+	bool FlushFAT();
+	int FindOldestFAT();
+	int FindNewestFAT();
+	bool ValidateFAT();
 
 private:
 	FilesystemInFlash fs;
 	uint8_t flash[FATENTRIES][SECTORSIZE];
+	bool flashErased[FATENTRIES];
 };
+
+
+Dir *Filesystem::opendir()
+{
+	struct dirent *de = (struct dirent *)malloc(sizeof(dirent));
+	de->off = -1;
+	return (void*)de;
+}
+
+struct dirent *Filesystem::readdir(Dir *dir)
+{
+	struct dirent *de = reinterpret_cast<struct dirent *>(dir);
+	de->off++;
+	while (de->off < FILEENTRIES) {
+		FileEntry *f = GetFileEntry(de->off);
+		if (f->name[0]) {
+			strncpy(de->name, f->name, sizeof(f->name));
+			de->name[sizeof(de->name)-1] = 0;
+			return de;
+		}
+		de->off++;
+	}
+	return NULL;
+}
+
+int Filesystem::closedir(Dir *dir)
+{
+	if (!dir) return -1;
+	free(dir);
+	return 0;
+}
+
+uint32_t crc32_for_byte(uint32_t r) {
+  for(int j = 0; j < 8; ++j)
+    r = (r & 1? 0: (uint32_t)0xEDB88320L) ^ r >> 1;
+  return r ^ (uint32_t)0xFF000000L;
+}
+
+void crc32(const void *data, size_t n_bytes, uint32_t* crc) {
+  static uint32_t table[0x100];
+  if(!*table)
+    for(size_t i = 0; i < 0x100; ++i)
+      table[i] = crc32_for_byte(i);
+  for(size_t i = 0; i < n_bytes; ++i)
+    *crc = table[(uint8_t)*crc ^ ((uint8_t*)data)[i]] ^ *crc >> 8;
+}
+
 
 
 Filesystem::Filesystem()
 {
+	for (int i=0; i<FATENTRIES; i++) flashErased[i] = false;
 }
 
 Filesystem::~Filesystem()
@@ -92,6 +161,65 @@ void Filesystem::DumpSector(int sector)
 	printf("Sector: %d", sector);
 	for (int i=0; i<SECTORSIZE; i++) printf("%s%02x ", (i%32)==0?"\n":"", flash[sector][i]);
 	printf("\n");
+}
+
+int Filesystem::available()
+{
+	int avail = 0;
+	for (int i=0; i<FATENTRIES; i++) {
+		if (GetFAT(i)==0) avail += SECTORSIZE;
+	}
+	return avail;
+}
+
+int Filesystem::fsize(const char *name)
+{
+	int idx = FindFileEntryByName(name);
+	if (idx < 0) return -1;
+	FileEntry *f = GetFileEntry(idx);
+	return f->len;
+}
+
+bool Filesystem::ValidateFAT()
+{
+	if (fs.magic != FSMAGIC) return false;
+	uint32_t savedCRC = fs.crc;
+	uint32_t calcCRC;
+	fs.crc = 0;
+	crc32((void*)&fs, sizeof(fs), &calcCRC);
+	if (savedCRC != calcCRC) return false; // Something baaaad here!
+	return true;
+}
+
+int Filesystem::FindOldestFAT()
+{
+	int oldIdx = 0;
+	int64_t oldEpoch = 1LL<<62;
+	for (int i=0; i<FATENTRIES; i++) {
+		ReadSector(i, &fs);
+		if (!ValidateFAT()) continue; // Ignore invalid ones
+		if (fs.epoch < oldEpoch) {
+			oldIdx = i;
+			oldEpoch = fs.epoch;
+		}
+	}
+	return oldIdx;
+}
+
+// Scan the FS and return index of latest epoch
+int Filesystem::FindNewestFAT()
+{
+	int newIdx = 0;
+	int newEpoch = 0;
+	for (int i=0; i<FATENTRIES; i++) {
+		ReadSector(i, &fs);
+		if (!ValidateFAT()) continue; // Ignore invalid ones
+		if (fs.epoch > newEpoch) {
+			newIdx = i;
+			newEpoch = fs.epoch;
+		}
+	}
+	return newIdx;
 }
 
 FileEntry *Filesystem::GetFileEntry(int idx)
@@ -187,22 +315,24 @@ int Filesystem::FindFreeSector()
 
 bool Filesystem::EraseSector(int sector) 
 {
+	printf("EraseSector(%d)\n", sector);
 	memset(flash[sector], 0, SECTORSIZE);
+	flashErased[sector] = true;
 	return true;
 }
 
 bool Filesystem::WriteSector(int sector, const void *data)
 {
 	printf("WriteSector(%d, data)\n", sector);
+	if (!flashErased[sector]) {
+		printf("!!!ERROR, sector not erased!!!\n");
+		return false;
+	}
 	memcpy(flash[sector], data, SECTORSIZE);
+	flashErased[sector] = false;
 	return true;
 }
 
-bool Filesystem::WritePartialSector(int sector, int offset, const void *data, int len)
-{
-	memcpy(&flash[sector][offset], data, len);
-	return true;
-}
 
 bool Filesystem::ReadSector(int sector, void *data)
 {
@@ -216,30 +346,52 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 	return true;
 }
 
-bool Filesystem::Format()
+bool Filesystem::mkfs()
 {
 	memset(&fs, 0, sizeof(fs));
-	for (int i = 0; i<FATCOPIES; i++) {
-		EraseSector(i);
-		SetFAT(i, FATEOF);
-	}
 	fs.magic = FSMAGIC;
 	fs.epoch = 1;
-
+	for (int i = 0; i<FATCOPIES; i++) {
+		SetFAT(i, FATEOF);
+	}
+	for (int i=0; i<FATCOPIES; i++) {
+		EraseSector(i);
+		WriteSector(i, &fs);
+	}
 	return true;
 }
 
-bool Filesystem::Mount()
+bool Filesystem::mount()
 {
-	return true;
+	int idx = FindNewestFAT();
+	if (idx >= 0) {
+		ReadSector(idx, &fs);
+		if (!ValidateFAT()) return false;
+		return true;
+	}
+	return false;
 }
 
-bool Filesystem::Unmount()
+bool Filesystem::umount()
 {
+	FlushFAT();
 	return true;
 }
 
-
+bool Filesystem::FlushFAT()
+{
+	fs.epoch++;
+	fs.crc = 0;
+	uint32_t calcCRC;
+	crc32((void*)&fs, sizeof(fs), &calcCRC);
+	fs.crc = calcCRC;
+	int idx = FindOldestFAT();
+	if (idx >= 0) {
+		WriteSector(idx, &fs);
+		return true;
+	}
+	return false;
+}
 
 class File
 {
@@ -253,6 +405,7 @@ public:
 	int seek(int off, int whence);
 	int seek(int off) { return seek(off, SEEK_SET); }
 	int close();
+	int tell();
 
 private:
 	File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
@@ -324,6 +477,13 @@ File::File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool re
         curReadSectorOffset = -SECTORSIZE;
 
 }
+
+int File::tell()
+{
+	if (modeRead) return readPos;
+	return writePos;
+}
+
 
 int File::write(const void *out, int size)
 {
@@ -483,7 +643,9 @@ int main(int argc, char *argv[])
 {
 	srand(time(NULL));
 	Filesystem *fs = new Filesystem;
-	fs->Format();
+	fs->mkfs();
+	fs->mount();
+	printf("Bytes Free: %d\n", fs->available());
 	File *f = fs->open("test.bin", "w");
 	for (int i=0; i<200; i++) {
 		f->write("0123456789", 10);
@@ -537,6 +699,21 @@ int main(int argc, char *argv[])
 	printf("buffx='%s'\n", buff);
 	f->close();
 
+	printf("Bytes Free: %d\n", fs->available());
+
+	fs->DumpFS();
+
+	printf("newfile.txt: %d bytes\n", fs->fsize("newfile.txt"));
+	printf("test.bin: %d bytes\n", fs->fsize("test.bin"));
+
+
+	Dir *d = fs->opendir();
+	do {
+		struct dirent *de = fs->readdir(d);
+		if (!de) break;
+		printf("File: '%s'\n", de->name);
+	} while (1);
+	fs->closedir(d);
 	return 0;
 }
 
