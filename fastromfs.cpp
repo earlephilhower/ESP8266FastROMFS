@@ -578,6 +578,8 @@ public:
 	int eof();
 	int size();
 	void name(char *buff, int buffLen);
+	int fputc(int c);
+	int fgetc();
 
 private:
 	File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
@@ -651,6 +653,20 @@ File::File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool re
         curReadSector = -1;
         curReadSectorOffset = -SECTORSIZE;
 
+}
+
+int File::fgetc()
+{
+	uint8_t c;
+	if (0 == read(&c, 1)) return -1;
+	return c;
+}
+
+int File::fputc(int c)
+{
+	uint8_t cc = (uint8_t)c;
+	if (0 == write(&cc, 1)) return -1;
+	return 0;
 }
 
 int File::size()
@@ -974,6 +990,11 @@ int main(int argc, char *argv[])
 	printf("'\n");
 	f->close();
 
+	f = fs->open("gettysburg.txt", "r");
+	int flencalc=0;
+	while (!f->eof()) { f->read(&c, 1); flencalc++; }
+	printf("LEN=%d, calcLEN=%d\n", f->size(), flencalc);
+	f->close();
 
 	f = fs->open("bytebybyte.bin", "w+");
 	c = 'a';
@@ -1000,6 +1021,16 @@ int main(int argc, char *argv[])
 		f->read(buff, len);
 		if (i%100 == 0) printf("++++Loop %d\n", i);
 	}
+	f->close();
+
+	f = fs->open("gettysburg.txt", "r");
+	printf("fgetc test: '");
+	while (1) {
+		int c = f->fgetc();
+		if (c < 0) break;
+		printf("%c", (char)c);
+	}
+	printf("'\n");
 	f->close();
 
 
