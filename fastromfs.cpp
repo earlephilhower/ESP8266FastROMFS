@@ -883,6 +883,22 @@ int main(int argc, char *argv[])
 	f->close();
 
 
+	f = fs->open("bytebybyte.bin", "w+");
+	c = 'a';
+	for (int i=0; i<4096*2; i++)
+		f->write(&c, 1);
+	f->seek(0, SEEK_SET);
+	zeros = 0;
+	do {
+		int x = f->read(&c, 1);
+		if (x==1) zeros++;
+		else break;
+	} while(1);
+	printf("I read %d bytes\n", zeros);
+
+	f->close();
+
+
 	fs->umount();
 
 
