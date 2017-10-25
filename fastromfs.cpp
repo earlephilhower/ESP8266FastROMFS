@@ -81,7 +81,13 @@ protected:
 	int FindFreeFileEntry();
 	int FindFileEntryByName(const char *name);
 	int CreateNewFileEntry(const char *name);
-	FileEntry *GetFileEntry(int idx);
+//	FileEntry *GetFileEntry(int idx);
+	void GetFileEntryName(int idx, char *dest);
+	int GetFileEntryLen(int idx);
+	int GetFileEntryFAT(int idx);
+	void SetFileEntryName(int idx, const char *src);
+	void SetFileEntryLen(int idx, int len);
+	void SetFileEntryFAT(int idx, int fat);
 	bool FlushFAT();
 	int FindOldestFAT();
 	int FindNewestFAT();
@@ -89,9 +95,46 @@ protected:
 
 private:
 	FilesystemInFlash fs;
+	bool fsIsMounted;
+	bool fsIsDirty;
 	uint8_t flash[FATENTRIES][SECTORSIZE];
 	bool flashErased[FATENTRIES];
 };
+
+void Filesystem::GetFileEntryName(int idx, char *dest)
+{
+	memcpy(dest, fs.fileEntry[idx].name, NAMELEN);
+}
+
+int Filesystem::GetFileEntryLen(int idx)
+{
+	return fs.fileEntry[idx].len;
+}
+
+int Filesystem::GetFileEntryFAT(int idx)
+{
+	return fs.fileEntry[idx].fat;
+}
+
+void Filesystem::SetFileEntryName(int idx, const char *src)
+{
+	strncpy(fs.fileEntry[idx].name, src, NAMELEN);
+	fsIsDirty = true;
+}
+
+void Filesystem::SetFileEntryLen(int idx, int len)
+{
+	fs.fileEntry[idx].len = len;
+	fsIsDirty = true;
+}
+
+
+void Filesystem::SetFileEntryFAT(int idx, int fat)
+{
+	fs.fileEntry[idx].fat = fat;
+	fsIsDirty = true;
+}
+
 
 
 Dir *Filesystem::opendir()
@@ -107,11 +150,12 @@ struct dirent *Filesystem::readdir(Dir *dir)
 	struct dirent *de = reinterpret_cast<struct dirent *>(dir);
 	de->off++;
 	while (de->off < FILEENTRIES) {
-		FileEntry *f = GetFileEntry(de->off);
-		if (f->name[0]) {
-			strncpy(de->name, f->name, sizeof(f->name));
+		char name[NAMELEN];
+		GetFileEntryName(de->off, name);
+		if (name[0]) {
+			strncpy(de->name, name, sizeof(name));
 			de->name[sizeof(de->name)-1] = 0;
-			de->len = f->len;
+			de->len = GetFileEntryLen(de->off);
 			return de;
 		}
 		de->off++;
@@ -150,10 +194,12 @@ void crc32(const void *data, size_t n_bytes, uint32_t* crc) {
 Filesystem::Filesystem()
 {
 	for (int i=0; i<FATENTRIES; i++) flashErased[i] = false;
+	fsIsDirty = false;
 }
 
 Filesystem::~Filesystem()
 {
+	if (fsIsMounted) umount();
 }
 
 
@@ -185,8 +231,7 @@ int Filesystem::fsize(const char *name)
 {
 	int idx = FindFileEntryByName(name);
 	if (idx < 0) return -1;
-	FileEntry *f = GetFileEntry(idx);
-	return f->len;
+	return GetFileEntryLen(idx);
 }
 
 bool Filesystem::ValidateFAT()
@@ -204,7 +249,7 @@ int Filesystem::FindOldestFAT()
 {
 	int oldIdx = 0;
 	int64_t oldEpoch = 1LL<<62;
-	for (int i=0; i<FATENTRIES; i++) {
+	for (int i=0; i<FATCOPIES; i++) {
 		uint64_t space[2]; // hold magic and epoch only
 		ReadPartialSector(i, 0, space, sizeof(space));
 		if (space[0] != FSMAGIC) {
@@ -224,7 +269,7 @@ int Filesystem::FindNewestFAT()
 {
 	int newIdx = 0;
 	int64_t newEpoch = 0;
-	for (int i=0; i<FATENTRIES; i++) {
+	for (int i=0; i<FATCOPIES; i++) {
 		uint64_t space[2]; // hold magic and epoch
 		ReadPartialSector(i, 0, space, sizeof(space));
 		if (space[0] != FSMAGIC) continue; // Ignore invalid ones
@@ -236,12 +281,12 @@ int Filesystem::FindNewestFAT()
 	return newIdx;
 }
 
-FileEntry *Filesystem::GetFileEntry(int idx)
-{
-	if ((idx < 0) || (idx >=FILEENTRIES)) return NULL;
-
-	return &fs.fileEntry[idx];
-}
+//FileEntry *Filesystem::GetFileEntry(int idx)
+//{
+//	if ((idx < 0) || (idx >=FILEENTRIES)) return NULL;
+//
+//	return &fs.fileEntry[idx];
+//}
 
 int Filesystem::FindFileEntryByName(const char *name)
 {
@@ -269,6 +314,7 @@ int Filesystem::CreateNewFileEntry(const char *name)
 	strncpy(fs.fileEntry[idx].name, name, sizeof(fs.fileEntry[idx].name));
 	fs.fileEntry[idx].fat = sec;
 	fs.fileEntry[idx].len = 0;
+	fsIsDirty = true;
 	SetFAT(sec, FATEOF);
 	if (!FlushFAT()) return -1;
 	return idx;
@@ -324,6 +370,8 @@ void Filesystem::SetFAT(int idx, int val)
 		fs.fat[bo+1] |= (val>>4) & 0xf0;
 		fs.fat[bo] = val & 0xff;
 	}
+
+	fsIsDirty = true;
 }
 
 int Filesystem::FindFreeSector()
@@ -387,15 +435,23 @@ bool Filesystem::mkfs()
 		if (!EraseSector(i)) return false;
 		if (!WriteSector(i, &fs)) return false;
 	}
+	fsIsMounted = true;
+	fsIsDirty = true;
+	FlushFAT();
+	fsIsMounted = false;
+	fsIsDirty = false;
 	return true;
 }
 
 bool Filesystem::mount()
 {
+	printf("mount()\n");
 	int idx = FindNewestFAT();
 	if (idx >= 0) {
 		if (!ReadSector(idx, &fs)) return false;
 		if (!ValidateFAT()) return false;
+		fsIsDirty = false;
+		fsIsMounted = true;
 		return true;
 	}
 	return false;
@@ -403,12 +459,16 @@ bool Filesystem::mount()
 
 bool Filesystem::umount()
 {
+printf("umount()\n");
 	if (!FlushFAT()) return false;
 	return true;
 }
 
 bool Filesystem::FlushFAT()
 {
+printf("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
+	if (!fsIsMounted || !fsIsDirty) return true; // Nothing to do here...
+
 	fs.epoch++;
 	fs.crc = 0;
 	uint32_t calcCRC = 0;
@@ -518,7 +578,7 @@ int File::tell()
 
 int File::eof()
 {
-	if (modeRead) return (readPos == fs->GetFileEntry(fileIdx)->len) ? true : false;
+	if (modeRead) return (readPos == fs->GetFileEntryLen(fileIdx)) ? true : false;
 	return false;  //TODO...what does eof() on a writable only file mean?
 }
 
@@ -534,7 +594,7 @@ int File::write(const void *out, int size)
 			if (!fs->WriteSector(curWriteSector, data)) return 0;
 		}
 		// Traverse the FAT table, optionally extending the file
-		curWriteSector = fs->GetFileEntry(fileIdx)->fat;
+		curWriteSector = fs->GetFileEntryFAT(fileIdx);
 		curWriteSectorOffset = 0;
 		while (! ( (curWriteSectorOffset <= writePos) && ((curWriteSectorOffset+SECTORSIZE) > writePos) ) ) {
 			if (fs->GetFAT(curWriteSector) == FATEOF) { // Need to extend
@@ -550,12 +610,12 @@ int File::write(const void *out, int size)
 			}
 			curWriteSectorOffset += SECTORSIZE;
 		}
-		if (fs->GetFileEntry(fileIdx)->len > curWriteSectorOffset) { // Read in old data
+		if (fs->GetFileEntryLen(fileIdx) > curWriteSectorOffset) { // Read in old data
 			if (!fs->ReadSector(curWriteSector, data)) return 0;
 		} else { // New sector...
 			memset(data, 0, SECTORSIZE);
 		}
-		fs->GetFileEntry(fileIdx)->len = max(fs->GetFileEntry(fileIdx)->len, curWriteSectorOffset);
+		fs->SetFileEntryLen(fileIdx, max(fs->GetFileEntryLen(fileIdx), curWriteSectorOffset));
 	}
 
 	// We're in the correct sector.  Start writing and extending/overwriting
@@ -587,7 +647,7 @@ int File::write(const void *out, int size)
 		writePos += amountWritableInThisSector; // We wrote this little bit
 		writtenBytes += amountWritableInThisSector;
 		if (!modeAppend) readPos = writePos;
-		fs->GetFileEntry(fileIdx)->len = max(fs->GetFileEntry(fileIdx)->len, writePos); // Potentially we just extended the file
+		fs->SetFileEntryLen(fileIdx, max(fs->GetFileEntryLen(fileIdx), writePos)); // Potentially we just extended the file
 		// Reduce bytes available to write, increment data pointer
 		size -= amountWritableInThisSector;
 		out = reinterpret_cast<const char*>(out) + amountWritableInThisSector;
@@ -598,6 +658,7 @@ int File::write(const void *out, int size)
 
 int File::close()
 {
+printf("close()\n");
 	if (!modeWrite && !modeAppend) return 0;
 	if (!dataDirty) return 0;
 	if (!fs->EraseSector(curWriteSector)) return -1;
@@ -609,7 +670,7 @@ int File::read(void *in, int size)
 {
 	if (!modeRead || !in || !size) return 0;
 
-	int readableBytesInFile = fs->GetFileEntry(fileIdx)->len - readPos;
+	int readableBytesInFile = fs->GetFileEntryLen(fileIdx) - readPos;
 	size = min(readableBytesInFile, size); // We can only read to the end of file...
 	if (size <= 0) return 0;
 
@@ -618,7 +679,7 @@ int File::read(void *in, int size)
 	// Make sure we're reading from somewhere in the current sector
 	if (! ( (curReadSectorOffset <= readPos) && ((curReadSectorOffset+SECTORSIZE) > readPos) ) ) {
 		// Traverse the FAT table, optionally extending the file
-		curReadSector = fs->GetFileEntry(fileIdx)->fat;
+		curReadSector = fs->GetFileEntryFAT(fileIdx);
 		curReadSectorOffset = 0;
 		while (! ( (curReadSectorOffset <= readPos) && ((curReadSectorOffset+SECTORSIZE) > readPos) ) ) {
 			if (fs->GetFAT(curReadSector) == FATEOF) { // Oops, reading past EOF!
@@ -663,7 +724,7 @@ int File::seek(int off, int whence)
 	switch(whence) {
 		case SEEK_SET: absolutePos = off; break;
 		case SEEK_CUR: absolutePos = readPos + off; break;
-		case SEEK_END: absolutePos = fs->GetFileEntry(fileIdx)->len + off; break;
+		case SEEK_END: absolutePos = fs->GetFileEntryLen(fileIdx) + off; break;
 		default: return -1;
 	}
 	if (absolutePos < 0) return -1; // Can't seek before beginning of file
@@ -683,7 +744,7 @@ int main(int argc, char *argv[])
 	srand(time(NULL));
 	Filesystem *fs = new Filesystem;
 	fs->mkfs();
-	fs->mount();
+	printf("mount ret = %d\n", fs->mount());
 	printf("Bytes Free: %d\n", fs->available());
 	File *f = fs->open("test.bin", "w");
 	for (int i=0; i<200; i++) {
@@ -697,6 +758,7 @@ int main(int argc, char *argv[])
 	f->seek(12, SEEK_SET);
 	f->write("Earle Is At 12", 14);
 	f->close();
+	delete f;
 	fs->DumpFS();
 
 	f = fs->open("test.bin", "r");
@@ -712,6 +774,7 @@ int main(int argc, char *argv[])
 	buff[1000] = 0;
 	printf("buffx='%s'\n", buff);
 	f->close();
+	delete f;
 
 	f = fs->open("test.bin", "r+");
 	f->seek(4080, SEEK_SET);
@@ -721,22 +784,26 @@ int main(int argc, char *argv[])
 	buff[1000] = 0;
 	printf("buffx='%s'\n", buff);
 	f->close();
+	delete f;
 
 	f = fs->open("newfile.txt", "w");
 	f->write("Four score and seven years ago our forefathers...", 50);
 	f->close();
+	delete f;
 
 	f = fs->open("test.bin", "r+");
 	f->read(buff, 50);
 	buff[50]=0;
 	printf("buffx='%s'\n", buff);
 	f->close();
+	delete f;
 
 	f = fs->open("newfile.txt", "r+");
 	f->read(buff, 50);
 	buff[50]=0;
 	printf("buffx='%s'\n", buff);
 	f->close();
+	delete f;
 
 	printf("Bytes Free: %d\n", fs->available());
 
@@ -746,13 +813,23 @@ int main(int argc, char *argv[])
 	printf("test.bin: %d bytes\n", fs->fsize("test.bin"));
 
 
+
+	fs->umount();
+
+	printf("UNMOUNT/REMOUNT...\n");
+	fs->mount();
 	Dir *d = fs->opendir();
 	do {
 		struct dirent *de = fs->readdir(d);
 		if (!de) break;
-		printf("File: '%s'\n", de->name);
+		printf("File: '%s', len=%d\n", de->name, de->len);
 	} while (1);
 	fs->closedir(d);
+	fs->umount();
+
+
+	delete fs;
+
 	return 0;
 }
 
