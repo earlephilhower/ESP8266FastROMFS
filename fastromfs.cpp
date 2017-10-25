@@ -104,12 +104,15 @@ private:
 
 bool Filesystem::exists(const char *name)
 {
+	if (!fsIsMounted) return false;
+
 	if (FindFileEntryByName(name)>=0) return true;
 	return false;
 }
 
 bool Filesystem::rename(const char *old, const char *newName)
 {
+	if (!fsIsMounted) return false;
 	int idx = FindFileEntryByName(old);
 	int newIdx = FindFileEntryByName(newName);
 	if ((idx>=0) && (newIdx==-1)) {
@@ -158,6 +161,7 @@ void Filesystem::SetFileEntryFAT(int idx, int fat)
 
 Dir *Filesystem::opendir()
 {
+	if (!fsIsMounted) return NULL;
 	struct dirent *de = (struct dirent *)malloc(sizeof(dirent));
 	if (!de) return NULL; // OOM
 	de->off = -1;
@@ -166,6 +170,7 @@ Dir *Filesystem::opendir()
 
 struct dirent *Filesystem::readdir(Dir *dir)
 {
+	if (!fsIsMounted) return NULL;
 	struct dirent *de = reinterpret_cast<struct dirent *>(dir);
 	de->off++;
 	while (de->off < FILEENTRIES) {
@@ -184,6 +189,7 @@ struct dirent *Filesystem::readdir(Dir *dir)
 
 int Filesystem::closedir(Dir *dir)
 {
+	if (!fsIsMounted) return false;
 	if (!dir) return -1;
 	free(dir);
 	return 0;
@@ -239,6 +245,7 @@ void Filesystem::DumpSector(int sector)
 
 int Filesystem::available()
 {
+	if (!fsIsMounted) return false;
 	int avail = 0;
 	for (int i=0; i<FATENTRIES; i++) {
 		if (GetFAT(i)==0) avail += SECTORSIZE;
@@ -248,6 +255,7 @@ int Filesystem::available()
 
 int Filesystem::fsize(const char *name)
 {
+	if (!fsIsMounted) return false;
 	int idx = FindFileEntryByName(name);
 	if (idx < 0) return -1;
 	return GetFileEntryLen(idx);
@@ -334,6 +342,7 @@ int Filesystem::CreateNewFileEntry(const char *name)
 
 bool Filesystem::unlink(const char *name)
 {
+	if (!fsIsMounted) return false;
 printf("unlink('%s')\n", name);
 	int idx = FindFileEntryByName(name);
 	if (idx < 0) return false;
@@ -396,7 +405,7 @@ int Filesystem::FindFreeSector()
 
 bool Filesystem::EraseSector(int sector) 
 {
-	if ((sector<0) || (sector >=FATENTRIES)) return false;
+	if ((sector<0) || (sector >= FATENTRIES)) return false;
 
 	printf("EraseSector(%d)\n", sector);
 	memset(flash[sector], 0, SECTORSIZE);
@@ -406,7 +415,8 @@ bool Filesystem::EraseSector(int sector)
 
 bool Filesystem::WriteSector(int sector, const void *data)
 {
-	if ((sector<0) || (sector >=FATENTRIES) || !data) return false;
+	if ((sector<0) || (sector >= FATENTRIES) || !data) return false;
+	if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 	printf("WriteSector(%d, data)\n", sector);
 	if (!flashErased[sector]) {
@@ -437,6 +447,7 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 
 bool Filesystem::mkfs()
 {
+	if (fsIsMounted) return false;
 	memset(&fs, 0, sizeof(fs));
 	fs.magic = FSMAGIC;
 	fs.epoch = 1;
@@ -457,6 +468,7 @@ bool Filesystem::mkfs()
 
 bool Filesystem::mount()
 {
+	if (fsIsMounted) return false;
 	printf("mount()\n");
 	int idx = FindNewestFAT();
 	if (idx >= 0) {
@@ -471,6 +483,7 @@ bool Filesystem::mount()
 
 bool Filesystem::umount()
 {
+	if (!fsIsMounted) return false;
 printf("umount()\n");
 	if (!FlushFAT()) return false;
 	return true;
@@ -532,6 +545,7 @@ private:
 
 File *Filesystem::open(const char *name, const char *mode)
 {
+	if (!fsIsMounted) return NULL;
 	if (!name || !mode) return NULL;
 
 printf("open('%s', '%s')\n", name, mode);
