@@ -576,6 +576,8 @@ public:
 	int close();
 	int tell();
 	int eof();
+	int size();
+	void name(char *buff, int buffLen);
 
 private:
 	File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
@@ -650,6 +652,21 @@ File::File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool re
         curReadSectorOffset = -SECTORSIZE;
 
 }
+
+int File::size()
+{
+	return fs->GetFileEntryLen(fileIdx);
+}
+
+void File::name(char *buff, int len)
+{
+	char name[NAMELEN+1];
+	fs->GetFileEntryName(fileIdx, name);
+	name[NAMELEN] = 0;
+	strncpy(buff, name, len);
+	buff[len-1] = 0;
+}
+
 
 int File::tell()
 {
@@ -971,6 +988,18 @@ int main(int argc, char *argv[])
 	} while(1);
 	printf("I read %d bytes\n", zeros);
 
+	f->close();
+
+	f = fs->open("test.bin", "rb");
+	int sz = f->size();
+	srand(123); // Repeatable test
+	for (int i=0; i<10000; i++) {
+		int off = rand() % sz;
+		int len = rand() % 100;
+		f->seek(off);
+		f->read(buff, len);
+		if (i%100 == 0) printf("++++Loop %d\n", i);
+	}
 	f->close();
 
 
