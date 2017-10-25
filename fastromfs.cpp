@@ -44,6 +44,7 @@ typedef void Dir; // Opaque for the masses
 struct dirent {
 	int off;
 	char name[NAMELEN + 1]; // Ensure space for \0
+	int len;
 };
 
 class File;
@@ -96,6 +97,7 @@ private:
 Dir *Filesystem::opendir()
 {
 	struct dirent *de = (struct dirent *)malloc(sizeof(dirent));
+	if (!de) return NULL; // OOM
 	de->off = -1;
 	return (void*)de;
 }
@@ -109,6 +111,7 @@ struct dirent *Filesystem::readdir(Dir *dir)
 		if (f->name[0]) {
 			strncpy(de->name, f->name, sizeof(f->name));
 			de->name[sizeof(de->name)-1] = 0;
+			de->len = f->len;
 			return de;
 		}
 		de->off++;
@@ -124,18 +127,22 @@ int Filesystem::closedir(Dir *dir)
 }
 
 uint32_t crc32_for_byte(uint32_t r) {
-  for(int j = 0; j < 8; ++j)
-    r = (r & 1? 0: (uint32_t)0xEDB88320L) ^ r >> 1;
-  return r ^ (uint32_t)0xFF000000L;
+	for (int j = 0; j < 8; ++j) {
+		r = (r & 1? 0: (uint32_t)0xEDB88320L) ^ r >> 1;
+	}
+	return r ^ (uint32_t)0xFF000000L;
 }
 
 void crc32(const void *data, size_t n_bytes, uint32_t* crc) {
-  static uint32_t table[0x100];
-  if(!*table)
-    for(size_t i = 0; i < 0x100; ++i)
-      table[i] = crc32_for_byte(i);
-  for(size_t i = 0; i < n_bytes; ++i)
-    *crc = table[(uint8_t)*crc ^ ((uint8_t*)data)[i]] ^ *crc >> 8;
+	static uint32_t table[0x100];
+	if (!*table) {
+		for (size_t i = 0; i < 0x100; ++i) {
+			table[i] = crc32_for_byte(i);
+		}
+	}
+	for (size_t i = 0; i < n_bytes; ++i) {
+		*crc = table[(uint8_t)*crc ^ ((uint8_t*)data)[i]] ^ *crc >> 8;
+	}
 }
 
 
@@ -148,6 +155,8 @@ Filesystem::Filesystem()
 Filesystem::~Filesystem()
 {
 }
+
+
 void Filesystem::DumpFS()
 {
 	printf("%-32s - %-5s - %-5s\n", "name", "len", "fat");
@@ -184,7 +193,7 @@ bool Filesystem::ValidateFAT()
 {
 	if (fs.magic != FSMAGIC) return false;
 	uint32_t savedCRC = fs.crc;
-	uint32_t calcCRC;
+	uint32_t calcCRC = 0;
 	fs.crc = 0;
 	crc32((void*)&fs, sizeof(fs), &calcCRC);
 	if (savedCRC != calcCRC) return false; // Something baaaad here!
@@ -196,11 +205,15 @@ int Filesystem::FindOldestFAT()
 	int oldIdx = 0;
 	int64_t oldEpoch = 1LL<<62;
 	for (int i=0; i<FATENTRIES; i++) {
-		ReadSector(i, &fs);
-		if (!ValidateFAT()) continue; // Ignore invalid ones
-		if (fs.epoch < oldEpoch) {
+		uint64_t space[2]; // hold magic and epoch only
+		ReadPartialSector(i, 0, space, sizeof(space));
+		if (space[0] != FSMAGIC) {
+			// This one is bad, so let's overwrite it!
+			return i;
+		}
+		if ((int64_t)space[1] < oldEpoch) {
 			oldIdx = i;
-			oldEpoch = fs.epoch;
+			oldEpoch = (int64_t)space[1];
 		}
 	}
 	return oldIdx;
@@ -210,13 +223,14 @@ int Filesystem::FindOldestFAT()
 int Filesystem::FindNewestFAT()
 {
 	int newIdx = 0;
-	int newEpoch = 0;
+	int64_t newEpoch = 0;
 	for (int i=0; i<FATENTRIES; i++) {
-		ReadSector(i, &fs);
-		if (!ValidateFAT()) continue; // Ignore invalid ones
-		if (fs.epoch > newEpoch) {
+		uint64_t space[2]; // hold magic and epoch
+		ReadPartialSector(i, 0, space, sizeof(space));
+		if (space[0] != FSMAGIC) continue; // Ignore invalid ones
+		if ((int64_t)space[1] > newEpoch) {
 			newIdx = i;
-			newEpoch = fs.epoch;
+			newEpoch = (int64_t)space[1];
 		}
 	}
 	return newIdx;
@@ -231,6 +245,8 @@ FileEntry *Filesystem::GetFileEntry(int idx)
 
 int Filesystem::FindFileEntryByName(const char *name)
 {
+	if (!name) return -1;
+
 	for (int i=0; i<FILEENTRIES; i++) {
 		if (!strncmp(fs.fileEntry[i].name, name, sizeof(fs.fileEntry[i].name))) return i;
 	}
@@ -254,6 +270,7 @@ int Filesystem::CreateNewFileEntry(const char *name)
 	fs.fileEntry[idx].fat = sec;
 	fs.fileEntry[idx].len = 0;
 	SetFAT(sec, FATEOF);
+	if (!FlushFAT()) return -1;
 	return idx;
 }
 
@@ -272,11 +289,13 @@ printf("unlink('%s')\n", name);
 	fs.fileEntry[idx].name[0] = 0;
 	fs.fileEntry[idx].len = 0;
 	fs.fileEntry[idx].fat = 0;
-	return true;
+	return FlushFAT();
 }
 
 int Filesystem::GetFAT(int idx)
 {
+	if ((idx < 0) || (idx >= FATENTRIES)) return -1;
+
 	int bo = (idx/2) * 3;
 	int ret;
 	if (idx & 1) {
@@ -293,6 +312,8 @@ int Filesystem::GetFAT(int idx)
 
 void Filesystem::SetFAT(int idx, int val)
 {
+	if ((idx < 0) || (idx >= FATENTRIES)) return;
+
 	int bo = (idx/2) * 3;
 	if (idx & 1) {
 		fs.fat[bo+1] &= ~0x0f;
@@ -315,6 +336,8 @@ int Filesystem::FindFreeSector()
 
 bool Filesystem::EraseSector(int sector) 
 {
+	if ((sector<0) || (sector >=FATENTRIES)) return false;
+
 	printf("EraseSector(%d)\n", sector);
 	memset(flash[sector], 0, SECTORSIZE);
 	flashErased[sector] = true;
@@ -323,6 +346,8 @@ bool Filesystem::EraseSector(int sector)
 
 bool Filesystem::WriteSector(int sector, const void *data)
 {
+	if ((sector<0) || (sector >=FATENTRIES) || !data) return false;
+
 	printf("WriteSector(%d, data)\n", sector);
 	if (!flashErased[sector]) {
 		printf("!!!ERROR, sector not erased!!!\n");
@@ -336,12 +361,16 @@ bool Filesystem::WriteSector(int sector, const void *data)
 
 bool Filesystem::ReadSector(int sector, void *data)
 {
+	if ((sector<0) || (sector >=FATENTRIES) || !data) return false;
+
 	memcpy(data, flash[sector], SECTORSIZE);
 	return true;
 }
 
 bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 {
+	if ((sector<0) || (sector >=FATENTRIES) || !data || (len < 0) || (offset < 0) || (offset+len > SECTORSIZE)) return false;
+
 	memcpy(data, &flash[sector][offset], len);
 	return true;
 }
@@ -355,8 +384,8 @@ bool Filesystem::mkfs()
 		SetFAT(i, FATEOF);
 	}
 	for (int i=0; i<FATCOPIES; i++) {
-		EraseSector(i);
-		WriteSector(i, &fs);
+		if (!EraseSector(i)) return false;
+		if (!WriteSector(i, &fs)) return false;
 	}
 	return true;
 }
@@ -365,7 +394,7 @@ bool Filesystem::mount()
 {
 	int idx = FindNewestFAT();
 	if (idx >= 0) {
-		ReadSector(idx, &fs);
+		if (!ReadSector(idx, &fs)) return false;
 		if (!ValidateFAT()) return false;
 		return true;
 	}
@@ -374,7 +403,7 @@ bool Filesystem::mount()
 
 bool Filesystem::umount()
 {
-	FlushFAT();
+	if (!FlushFAT()) return false;
 	return true;
 }
 
@@ -382,13 +411,13 @@ bool Filesystem::FlushFAT()
 {
 	fs.epoch++;
 	fs.crc = 0;
-	uint32_t calcCRC;
+	uint32_t calcCRC = 0;
 	crc32((void*)&fs, sizeof(fs), &calcCRC);
 	fs.crc = calcCRC;
 	int idx = FindOldestFAT();
 	if (idx >= 0) {
-		WriteSector(idx, &fs);
-		return true;
+		if (!EraseSector(idx)) return false;
+		return WriteSector(idx, &fs);
 	}
 	return false;
 }
@@ -406,6 +435,7 @@ public:
 	int seek(int off) { return seek(off, SEEK_SET); }
 	int close();
 	int tell();
+	int eof();
 
 private:
 	File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
@@ -428,28 +458,30 @@ private:
 
 File *Filesystem::open(const char *name, const char *mode)
 {
+	if (!name || !mode) return NULL;
+
 printf("open('%s', '%s')\n", name, mode);
-	if (!strcmp(mode, "r")) { //  Open text file for reading.  The stream is positioned at the beginning of the file.
+	if (!strcmp(mode, "r") || !strcmp(mode, "rb")) { //  Open text file for reading.  The stream is positioned at the beginning of the file.
 		int fidx = FindFileEntryByName(name);
 		if (fidx < 0) return NULL;
 		return new File(this, fidx, 0, 0,  true, false, false);
-	} else if (!strcmp(mode, "r+")) { // Open for reading and writing.  The stream is positioned at the beginning of the file.
+	} else if (!strcmp(mode, "r+") || !strcmp(mode, "r+b")) { // Open for reading and writing.  The stream is positioned at the beginning of the file.
 		int fidx = FindFileEntryByName(name);
 		if (fidx < 0) return NULL;
 		return new File(this, fidx, 0, 0,  true, true, false);
-	} else if (!strcmp(mode, "w")) { // Truncate file to zero length or create text file for writing.  The stream is positioned at the beginning of the file.
+	} else if (!strcmp(mode, "w") || !strcmp(mode, "wb")) { // Truncate file to zero length or create text file for writing.  The stream is positioned at the beginning of the file.
 		unlink(name); // ignore failure, may not exist
 		int fidx = CreateNewFileEntry(name);
 		return new File(this, fidx, 0, 0, false, true, false);
-	} else if (!strcmp(mode, "w+")) { // Open for reading and writing.  The file is created if it does not exist, otherwise it is truncated.  The stream is positioned at the beginning of the file.
+	} else if (!strcmp(mode, "w+") || !strcmp(mode, "w+b")) { // Open for reading and writing.  The file is created if it does not exist, otherwise it is truncated.  The stream is positioned at the beginning of the file.
 		unlink(name); // ignore failure, may not exist
 		int fidx = CreateNewFileEntry(name);
 		return new File(this, fidx, 0, 0, true, true, false);
-	} else if (!strcmp(mode, "a")) { // Open for appending (writing at end of file).  The file is created if it does not exist.  The stream is positioned at the end of the file.
+	} else if (!strcmp(mode, "a") || !strcmp(mode, "ab")) { // Open for appending (writing at end of file).  The file is created if it does not exist.  The stream is positioned at the end of the file.
 		int fidx = FindFileEntryByName(name);
 		if (fidx < 0) fidx = CreateNewFileEntry(name);
 		return new File(this, fidx, 0, fs.fileEntry[fidx].len, false, true, true);
-	} else if (!strcmp(mode, "a+")) { // Open for reading and appending (writing at end of file).  The file is created if it does not exist.  The initial file position for reading is at the beginning of the file, but output is always appended to the end of the file.
+	} else if (!strcmp(mode, "a+") || !strcmp(mode, "a+b")) { // Open for reading and appending (writing at end of file).  The file is created if it does not exist.  The initial file position for reading is at the beginning of the file, but output is always appended to the end of the file.
 		int fidx = FindFileEntryByName(name);
 		if (fidx < 0) fidx = CreateNewFileEntry(name);
 		return new File(this, fidx, 0, fs.fileEntry[fidx].len, true, true, true);
@@ -484,6 +516,11 @@ int File::tell()
 	return writePos;
 }
 
+int File::eof()
+{
+	if (modeRead) return (readPos == fs->GetFileEntry(fileIdx)->len) ? true : false;
+	return false;  //TODO...what does eof() on a writable only file mean?
+}
 
 int File::write(const void *out, int size)
 {
@@ -493,8 +530,8 @@ int File::write(const void *out, int size)
 	// Make sure we're writing somewhere within the current sector
 	if (! ( (curWriteSectorOffset <= writePos) && ((curWriteSectorOffset+SECTORSIZE) > writePos) ) ) {
 		if (dataDirty) {
-			fs->EraseSector(curWriteSector);
-			fs->WriteSector(curWriteSector, data);
+			if (!fs->EraseSector(curWriteSector)) return 0;
+			if (!fs->WriteSector(curWriteSector, data)) return 0;
 		}
 		// Traverse the FAT table, optionally extending the file
 		curWriteSector = fs->GetFileEntry(fileIdx)->fat;
@@ -506,15 +543,15 @@ int File::write(const void *out, int size)
 				fs->SetFAT(newSector, FATEOF);
 				curWriteSector = newSector;
 				memset(data, 0, SECTORSIZE);
-				fs->EraseSector(curWriteSector);
-				fs->WriteSector(curWriteSector, data);
+				if (!fs->EraseSector(curWriteSector)) return 0;
+				if (!fs->WriteSector(curWriteSector, data)) return 0;
 			} else {
 				curWriteSector = fs->GetFAT(curWriteSector);
 			}
 			curWriteSectorOffset += SECTORSIZE;
 		}
 		if (fs->GetFileEntry(fileIdx)->len > curWriteSectorOffset) { // Read in old data
-			fs->ReadSector(curWriteSector, data);
+			if (!fs->ReadSector(curWriteSector, data)) return 0;
 		} else { // New sector...
 			memset(data, 0, SECTORSIZE);
 		}
@@ -527,15 +564,16 @@ int File::write(const void *out, int size)
 		if (writePos && (writePos %SECTORSIZE)==0)  amountWritableInThisSector = 0;
 		if (amountWritableInThisSector == 0) {
 			if (dataDirty) { // need to flush this sector
-				fs->EraseSector(curWriteSector);
-				fs->WriteSector(curWriteSector, data);
+				if (!fs->EraseSector(curWriteSector)) return 0;
+				if (!fs->WriteSector(curWriteSector, data)) return 0;
 				dataDirty = false;
 			}
 			if (fs->GetFAT(curWriteSector) != FATEOF) { // Update - read in old data
 				curWriteSector = fs->GetFAT(curWriteSector);
-				fs->ReadSector(curWriteSector, data);
+				if (!fs->ReadSector(curWriteSector, data)) return 0;
 			} else { // Extend the file
 				int newSector = fs->FindFreeSector();
+				if (newSector < 0) return 0; // Out of space
 				fs->SetFAT(curWriteSector, newSector);
 				curWriteSector = newSector;
 				fs->SetFAT(newSector, FATEOF);
@@ -562,14 +600,14 @@ int File::close()
 {
 	if (!modeWrite && !modeAppend) return 0;
 	if (!dataDirty) return 0;
-	fs->EraseSector(curWriteSector);
+	if (!fs->EraseSector(curWriteSector)) return -1;
 	return fs->WriteSector(curWriteSector, data) ? 0 : -1;
 }
 
 
 int File::read(void *in, int size)
 {
-	if (!modeRead) return 0;
+	if (!modeRead || !in || !size) return 0;
 
 	int readableBytesInFile = fs->GetFileEntry(fileIdx)->len - readPos;
 	size = min(readableBytesInFile, size); // We can only read to the end of file...
@@ -608,7 +646,7 @@ int File::read(void *in, int size)
 		if (curReadSector == curWriteSector) { // R-A-W, so forward the data
 			memcpy(in, &data[offsetIntoData], amountReadableInThisSector);
 		} else {
-			fs->ReadPartialSector(curReadSector, offsetIntoData, in, amountReadableInThisSector);
+			if (!fs->ReadPartialSector(curReadSector, offsetIntoData, in, amountReadableInThisSector)) return 0;
 		}
 		readPos += amountReadableInThisSector;
 		if (!modeAppend) writePos = readPos;
@@ -621,11 +659,12 @@ int File::read(void *in, int size)
 
 int File::seek(int off, int whence)
 {
-	int absolutePos;// = offset we want to seek to from start of file
+	int absolutePos; // = offset we want to seek to from start of file
 	switch(whence) {
 		case SEEK_SET: absolutePos = off; break;
 		case SEEK_CUR: absolutePos = readPos + off; break;
 		case SEEK_END: absolutePos = fs->GetFileEntry(fileIdx)->len + off; break;
+		default: return -1;
 	}
 	if (absolutePos < 0) return -1; // Can't seek before beginning of file
 	if (modeAppend) {
