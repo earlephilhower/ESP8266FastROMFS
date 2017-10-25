@@ -60,6 +60,8 @@ public:
 	bool umount();
 	File *open(const char *name, const char *mode);
 	bool unlink(const char *name);
+	bool exists(const char *name);
+	bool rename(const char *src, const char *dest);
 	int available();
 	int fsize(const char *name);
 	Dir *opendir(const char *ignored) { return opendir(); };
@@ -81,7 +83,6 @@ protected:
 	int FindFreeFileEntry();
 	int FindFileEntryByName(const char *name);
 	int CreateNewFileEntry(const char *name);
-//	FileEntry *GetFileEntry(int idx);
 	void GetFileEntryName(int idx, char *dest);
 	int GetFileEntryLen(int idx);
 	int GetFileEntryFAT(int idx);
@@ -100,6 +101,24 @@ private:
 	uint8_t flash[FATENTRIES][SECTORSIZE];
 	bool flashErased[FATENTRIES];
 };
+
+bool Filesystem::exists(const char *name)
+{
+	if (FindFileEntryByName(name)>=0) return true;
+	return false;
+}
+
+bool Filesystem::rename(const char *old, const char *newName)
+{
+	int idx = FindFileEntryByName(old);
+	int newIdx = FindFileEntryByName(newName);
+	if ((idx>=0) && (newIdx==-1)) {
+		SetFileEntryName(idx, newName);
+		return true;
+	}
+	return false;
+}
+
 
 void Filesystem::GetFileEntryName(int idx, char *dest)
 {
@@ -280,13 +299,6 @@ int Filesystem::FindNewestFAT()
 	}
 	return newIdx;
 }
-
-//FileEntry *Filesystem::GetFileEntry(int idx)
-//{
-//	if ((idx < 0) || (idx >=FILEENTRIES)) return NULL;
-//
-//	return &fs.fileEntry[idx];
-//}
 
 int Filesystem::FindFileEntryByName(const char *name)
 {
@@ -662,7 +674,9 @@ printf("close()\n");
 	if (!modeWrite && !modeAppend) return 0;
 	if (!dataDirty) return 0;
 	if (!fs->EraseSector(curWriteSector)) return -1;
-	return fs->WriteSector(curWriteSector, data) ? 0 : -1;
+	int ret = fs->WriteSector(curWriteSector, data) ? 0 : -1;
+	delete this;
+	return ret;
 }
 
 
@@ -758,7 +772,6 @@ int main(int argc, char *argv[])
 	f->seek(12, SEEK_SET);
 	f->write("Earle Is At 12", 14);
 	f->close();
-	delete f;
 	fs->DumpFS();
 
 	f = fs->open("test.bin", "r");
@@ -774,7 +787,6 @@ int main(int argc, char *argv[])
 	buff[1000] = 0;
 	printf("buffx='%s'\n", buff);
 	f->close();
-	delete f;
 
 	f = fs->open("test.bin", "r+");
 	f->seek(4080, SEEK_SET);
@@ -784,26 +796,22 @@ int main(int argc, char *argv[])
 	buff[1000] = 0;
 	printf("buffx='%s'\n", buff);
 	f->close();
-	delete f;
 
 	f = fs->open("newfile.txt", "w");
 	f->write("Four score and seven years ago our forefathers...", 50);
 	f->close();
-	delete f;
 
 	f = fs->open("test.bin", "r+");
 	f->read(buff, 50);
 	buff[50]=0;
 	printf("buffx='%s'\n", buff);
 	f->close();
-	delete f;
 
 	f = fs->open("newfile.txt", "r+");
 	f->read(buff, 50);
 	buff[50]=0;
 	printf("buffx='%s'\n", buff);
 	f->close();
-	delete f;
 
 	printf("Bytes Free: %d\n", fs->available());
 
@@ -825,6 +833,18 @@ int main(int argc, char *argv[])
 		printf("File: '%s', len=%d\n", de->name, de->len);
 	} while (1);
 	fs->closedir(d);
+
+
+	fs->rename("newfile.txt", "gettysburg.txt");
+	d = fs->opendir();
+	do {
+		struct dirent *de = fs->readdir(d);
+		if (!de) break;
+		printf("File: '%s', len=%d\n", de->name, de->len);
+	} while (1);
+	fs->closedir(d);
+
+
 	fs->umount();
 
 
