@@ -231,8 +231,10 @@ Filesystem::~Filesystem()
 void Filesystem::DumpFS()
 {
 	printf("%-32s - %-5s - %-5s\n", "name", "len", "fat");
-	for (int i=0; i<FILEENTRIES; i++) printf("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
-	for (int i=0; i<FATENTRIES; i++) printf("%s%5d:%-5d ", 0==(i%8)?"\n":"", i, GetFAT(i));
+	for (int i=0; i<FILEENTRIES; i++) {
+		if (fs.fileEntry[i].name[0]) printf("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
+	}
+//	for (int i=0; i<FATENTRIES; i++) printf("%s%5d:%-5d ", 0==(i%8)?"\n":"", i, GetFAT(i));
 	printf("\n\n");
 }
 
@@ -432,6 +434,7 @@ bool Filesystem::WriteSector(int sector, const void *data)
 bool Filesystem::ReadSector(int sector, void *data)
 {
 	if ((sector<0) || (sector >=FATENTRIES) || !data) return false;
+	if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 	memcpy(data, flash[sector], SECTORSIZE);
 	return true;
@@ -441,7 +444,57 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 {
 	if ((sector<0) || (sector >=FATENTRIES) || !data || (len < 0) || (offset < 0) || (offset+len > SECTORSIZE)) return false;
 
-	memcpy(data, &flash[sector][offset], len);
+	// Easy case, everything is aligned and we can just do it...
+	if ( ((offset % 4)==0) && ((len % 4)==0) && (((const uintptr_t)data % 4)==0) ) {
+		memcpy(data, &flash[sector][offset], len);
+		return true;
+	}
+
+	memset(data, 0, len); // Clear buffer just for debugging sanity
+
+	// We're gonna get wordy here for sanity's sake.  This align and shifting is a brain twister.
+	uint8_t *destStart = reinterpret_cast<uint8_t*>(data);
+	uint8_t *destEnd = destStart + len;
+	uint8_t *destStartAligned = (uint8_t*) ((uintptr_t)(destStart+3) & (uintptr_t) ~3);
+	uint8_t *destEndAligned = (uint8_t*) ((uintptr_t)(destEnd) & (uintptr_t) ~3);
+	int destLen = destEnd - destStart;
+	int destLenAligned = destEndAligned - destStartAligned;
+	int srcStart = offset;
+	int srcEnd = srcStart + len;
+	int srcLen = len;
+	int srcStartAligned = (srcStart) & ~3;
+	int srcEndAligned = (srcEnd + 3) & ~3;
+	int srcLenAligned = srcEndAligned - srcStartAligned;
+	int shiftLeftBytes = 0;
+	int bytesToShift = 0;
+	if (destLenAligned > 0) {
+		// Read the flash aligned into the ram aligned
+		memcpy(destStartAligned, &flash[sector][srcStartAligned], destLenAligned);
+		// Move it to the beginning of the buffer
+		shiftLeftBytes = (destStartAligned - destStart) /* account for ram shift */ + (srcStart - srcStartAligned); /* flash shift */
+		bytesToShift = destLenAligned - (srcStart - srcStartAligned); // the alignment flash bytes are thrown away, all else kept
+		memmove(destStart, destStart + shiftLeftBytes, bytesToShift); // memmove because these overlap
+		// Adjust the pointers to indicate what we've completed so far, again for sanity's sake.
+		destStart += bytesToShift; // We wrote this many bytes
+		destLen -= bytesToShift;
+		memset(destStart, 0, destLen); // Clear for easier debug
+		srcStart += bytesToShift;
+		srcStartAligned = (srcStart) & ~3;
+		srcLen -= bytesToShift;
+		srcLenAligned = srcEndAligned - srcStartAligned;
+	}
+	// Now let's do the same thing to a stack buffer and memcpy to the final bit of ram
+	uint8_t buff[64 + 8]; // bounce buffer, need to account for shift of RAM and flash
+	uint8_t *alignBuff = (uint8_t*)((uintptr_t)(buff+3) & (uintptr_t) ~3); // 32bit aligned pointer into that buffer
+	// Read remainder of flash to the alignment bounce buffer.
+	memcpy(alignBuff, &flash[sector][srcStartAligned], srcLenAligned);
+	// Move it to destination buffer
+	memcpy(destStart, alignBuff + (srcStart - srcStartAligned), srcLen);
+	// Eh voila...easy peasy, lemon squeezy
+	void *simpledata = (void*)malloc(len);
+	memcpy(simpledata, &flash[sector][offset], len);
+	if (memcmp(simpledata, data, len))
+		printf("ERROR!\n");
 	return true;
 }
 
@@ -771,6 +824,8 @@ int File::seek(int off, int whence)
 
 int main(int argc, char *argv[])
 {
+	int len;
+	char buff[1001];
 	srand(time(NULL));
 	Filesystem *fs = new Filesystem;
 	fs->mkfs();
@@ -791,8 +846,14 @@ int main(int argc, char *argv[])
 	fs->DumpFS();
 
 	f = fs->open("test.bin", "r");
-	int len;
-	char buff[1001];
+	f->seek(2);
+	len = f->read(buff+1, 64);
+	buff[len+1] = 0;
+	printf("buff@2='%s'\n", buff+1);
+	f->close();
+//	exit(1);
+
+	f = fs->open("test.bin", "r");
 	do {
 		len = f->read(buff, 1000);
 		buff[1000] = 0;
