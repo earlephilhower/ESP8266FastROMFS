@@ -489,7 +489,9 @@ printf("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
 	int idx = FindOldestFAT();
 	if (idx >= 0) {
 		if (!EraseSector(idx)) return false;
-		return WriteSector(idx, &fs);
+		bool ret = WriteSector(idx, &fs);
+		if (ret) fsIsDirty = false;
+		return ret;
 	}
 	return false;
 }
@@ -633,7 +635,7 @@ int File::write(const void *out, int size)
 	// We're in the correct sector.  Start writing and extending/overwriting
 	while (size) {
 		int amountWritableInThisSector = min(size, SECTORSIZE - (writePos % SECTORSIZE));
-		if (writePos && (writePos %SECTORSIZE)==0)  amountWritableInThisSector = 0;
+		if (writePos >= curWriteSectorOffset+SECTORSIZE) amountWritableInThisSector = 0;
 		if (amountWritableInThisSector == 0) {
 			if (dataDirty) { // need to flush this sector
 				if (!fs->EraseSector(curWriteSector)) return 0;
@@ -708,7 +710,7 @@ int File::read(void *in, int size)
 	while (size) {
 		int offsetIntoData = readPos % SECTORSIZE; //= pointer into data[] 
 		int amountReadableInThisSector = min(size, SECTORSIZE - (readPos % SECTORSIZE));
-		if (readPos && (readPos %SECTORSIZE)==0)  amountReadableInThisSector = 0;
+		if (readPos > curReadSectorOffset+SECTORSIZE) amountReadableInThisSector = 0;
 		if (amountReadableInThisSector == 0) {
 			if (curReadSector == FATEOF) { // end
 				return readBytes; // Hit EOF...again, should not happen ever
@@ -798,7 +800,7 @@ int main(int argc, char *argv[])
 	f->close();
 
 	f = fs->open("newfile.txt", "w");
-	f->write("Four score and seven years ago our forefathers...", 50);
+	f->write("Four score and seven years ago our forefathers......", 50);
 	f->close();
 
 	f = fs->open("test.bin", "r+");
@@ -843,6 +845,42 @@ int main(int argc, char *argv[])
 		printf("File: '%s', len=%d\n", de->name, de->len);
 	} while (1);
 	fs->closedir(d);
+
+	f = fs->open("gettysburg.txt", "a+");
+	f->read(buff, 30);
+	buff[30] = 0;
+	printf("buff='%s', tell=%d\n", buff, f->tell());
+	f->write("I forget the rest", 17);
+	printf("appended read = '");
+	while (int l=f->read(buff, 30)) {
+		buff[l] = 0;
+		printf("%s", buff);
+	}
+	printf("'\n");
+	f->close();
+
+
+	f = fs->open("expand.bin", "w");
+	f->seek(5000, SEEK_SET);
+	f->write("@10,000", 8);
+	f->close();
+	fs->DumpFS();
+	f = fs->open("expand.bin", "rb");
+	int zeros = 0;
+	char c;
+	do {
+		f->read(&c, 1);
+		if (c==0) zeros++;
+		else break;
+	} while(1);
+	printf("I found %d zeros before the text: '", zeros);
+	do {
+		printf("%c", c);
+		f->read(&c, 1);
+		if (c==0) break;
+	} while(1);
+	printf("'\n");
+	f->close();
 
 
 	fs->umount();
