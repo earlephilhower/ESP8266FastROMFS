@@ -817,14 +817,14 @@ int FastROMFile::read(void *in, int size)
   return readBytes;
 }
 
-int FastROMFile::seek(int off, int whence)
+bool FastROMFile::seek(int off, int whence)
 {
   int absolutePos; // = offset we want to seek to from start of file
   switch (whence) {
     case SEEK_SET: absolutePos = off; break;
     case SEEK_CUR: absolutePos = readPos + off; break;
     case SEEK_END: absolutePos = fs->GetFileEntryLen(fileIdx) + off; break;
-    default: return -1;
+    default: return false;
   }
   if (absolutePos < 0) return -1; // Can't seek before beginning of file
   if (modeAppend) {
@@ -833,7 +833,7 @@ int FastROMFile::seek(int off, int whence)
     readPos = absolutePos; // a+ => read can move, write always appends
     writePos = absolutePos; // a+ => read can move, write always appends
   }
-  return 0;
+  return true;
 }
 
 

@@ -138,8 +138,8 @@ class FastROMFile
   public:
     int write(const void *out, int size);
     int read(void *data, int size);
-    int seek(int off, int whence);
-    int seek(int off) {
+    bool seek(int off, int whence);
+    bool seek(int off) {
       return seek(off, SEEK_SET);
     }
     int close();

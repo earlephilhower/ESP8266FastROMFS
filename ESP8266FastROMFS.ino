@@ -35,7 +35,11 @@ void DoFastROMFS()
   long stop = millis();
   Serial.printf("==> Time to write %dKB in 256b chunks = %ld milliseconds\n", TESTSIZEKB, stop - start);
 
-  Serial.printf("Reading %dKB file sequentially in 256b chunks", TESTSIZEKB);
+  f = fs->open("testwrite.bin", "r");
+  Serial.printf("==> Created file size = %d\n", f->size());
+  f->close();
+
+  Serial.printf("Reading %dKB file sequentially in 256b chunks\n", TESTSIZEKB);
   start = millis();
   f = fs->open("testwrite.bin", "r");
   for (int i=0; i<TESTSIZEKB; i++) {
@@ -51,13 +55,19 @@ void DoFastROMFS()
   f = fs->open("testwrite.bin", "r");
   for (int i=0; i<TESTSIZEKB; i++) {
     for (int j=0; j<4; j++) {
-      f->seek(-256 -256 * j * i, SEEK_END);
-      f->read(data, 256);
+      if (!f->seek(-256 -256 * j * i, SEEK_END)) {
+        Serial.printf("Unable to seek to %d, aborting\n", -256 -256 * j * i);
+        return;
+      }
+      if (256 != f->read(data, 256)) {
+        Serial.printf("Unable to read 256 bytes, aborting\n");
+        return;
+      }
     }
   }
   f->close();
   stop = millis();
-  Serial.printf("==> Time to read %d in reverse in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
+  Serial.printf("==> Time to read %dKB in reverse in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
 
   fs->umount();
 }
@@ -95,7 +105,11 @@ void DoSPIFFS()
   long stop = millis();
   Serial.printf("==> Time to write %dKB in 256b chunks = %ld milliseconds\n", TESTSIZEKB, stop - start);
 
-  Serial.printf("Reading %dKB file sequentially in 256b chunks", TESTSIZEKB);
+  f = SPIFFS.open("/testwrite.bin", "r");
+  Serial.printf("==> Created file size = %d\n", f.size());
+  f.close();
+
+  Serial.printf("Reading %dKB file sequentially in 256b chunks\n", TESTSIZEKB);
   start = millis();
   f = SPIFFS.open("/testwrite.bin", "r");
   for (int i=0; i<TESTSIZEKB; i++) {
@@ -108,16 +122,22 @@ void DoSPIFFS()
 
   Serial.printf("Reading %dKB file in reverse by 256b chunks\n", TESTSIZEKB);
   start = millis();
-  f = SPIFFS.open("testwrite.bin", "r");
+  f = SPIFFS.open("/testwrite.bin", "r");
   for (int i=0; i<TESTSIZEKB; i++) {
     for (int j=0; j<4; j++) {
-      f.seek(-256 -256 * j * i, SeekEnd);
-      f.read(data, 256);
+      if (!f.seek(-256 - 256 * j * i, SeekEnd)) {
+        Serial.printf("Unable to seek to %d, aborting\n", -256 -256 * j * i);
+        return;
+      }
+      if (256 != f.read(data, 256)) {
+        Serial.printf("Unable to read 256 bytes, aborting\n");
+        return;
+      }
     }
   }
   f.close();
   stop = millis();
-  Serial.printf("==> Time to read %d in reverse in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
+  Serial.printf("==> Time to read %dKB in reverse in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
 }
 
 
