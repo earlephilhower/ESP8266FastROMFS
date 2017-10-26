@@ -1,19 +1,37 @@
+/*
+  ESP8266FastROMFS
+  Filesystem for onboard flash focused on speed
+  
+  Copyright (C) 2017  Earle F. Philhower, III
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#ifdef ARDUINO
+#include <Arduino.h>
+#include <CRC32.h>
+#else
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <time.h>
+#endif
+
+#include "fastromfs.h"
 
 
-#define FSMAGIC 0xdead0beef0f00dll
-#define SECTORSIZE 4096
-#define FSSIZEMB 3
-#define FATENTRIES (FSSIZEMB * 1024 * 1024 / 4096)
-#define FATBYTES ((FATENTRIES * 12) / 8)
-#define FILEENTRIES ((int)((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry)))
-#define FATEOF 0xfff
-#define FATCOPIES 8
-#define NAMELEN 24
 
 #ifndef min
 	#define min(a,b) (((a)>(b))?(b):(a))
@@ -22,85 +40,6 @@
 	#define max(a,b) (((a)>(b))?(a):(b))
 #endif
 
-typedef struct {
-	char name[NAMELEN]; // Not necessarialy 0-terminated, beware!
-	int32_t fat; // Index to first FAT block. Only need 16 bits, but easiest to ensure alignment @32
-	int32_t len; // Can be 0 if file just created with no writes
-} FileEntry;
-
-typedef union {
-	uint8_t filler[SECTORSIZE]; // Ensure we take 1 full sector in RAM
-	struct {
-		uint64_t magic;
-		int64_t epoch; // If you roll over this, well, you're amazing
-		uint8_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
-		FileEntry fileEntry[ FILEENTRIES ];
-		uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
-	};
-} FilesystemInFlash;
-
-typedef void Dir; // Opaque for the masses
-
-struct dirent {
-	int off;
-	char name[NAMELEN + 1]; // Ensure space for \0
-	int len;
-};
-
-class File;
-
-class Filesystem
-{
-friend File;
-public:
-	Filesystem();
-	~Filesystem();
-	bool mkfs();
-	bool mount();
-	bool umount();
-	File *open(const char *name, const char *mode);
-	bool unlink(const char *name);
-	bool exists(const char *name);
-	bool rename(const char *src, const char *dest);
-	int available();
-	int fsize(const char *name);
-	Dir *opendir(const char *ignored) { return opendir(); };
-	Dir *opendir();
-	struct dirent *readdir(Dir *dir);
-	int closedir(Dir *dir);
-
-	void DumpFS();
-	void DumpSector(int sector);
-
-protected:
-	int GetFAT(int idx);
-	void SetFAT(int idx, int val);
-	bool EraseSector(int sector);
-	bool WriteSector(int sector, const void *data);
-	bool ReadSector(int sector, void *data);
-	bool ReadPartialSector(int sector, int offset, void *dest, int len);
-	int FindFreeSector();
-	int FindFreeFileEntry();
-	int FindFileEntryByName(const char *name);
-	int CreateNewFileEntry(const char *name);
-	void GetFileEntryName(int idx, char *dest);
-	int GetFileEntryLen(int idx);
-	int GetFileEntryFAT(int idx);
-	void SetFileEntryName(int idx, const char *src);
-	void SetFileEntryLen(int idx, int len);
-	void SetFileEntryFAT(int idx, int fat);
-	bool FlushFAT();
-	int FindOldestFAT();
-	int FindNewestFAT();
-	bool ValidateFAT();
-
-private:
-	FilesystemInFlash fs;
-	bool fsIsMounted;
-	bool fsIsDirty;
-	uint8_t flash[FATENTRIES][SECTORSIZE];
-	bool flashErased[FATENTRIES];
-};
 
 bool Filesystem::exists(const char *name)
 {
@@ -195,6 +134,15 @@ int Filesystem::closedir(Dir *dir)
 	return 0;
 }
 
+#ifdef ARDUINO
+void crc32(const void *data, size_t n_bytes, uint32_t* crc)
+{
+  *crc = 0;
+  CRC32 crc32;
+  crc32.update(data, n_bytes);
+  *crc = crc32.finalize();
+}
+#else
 uint32_t crc32_for_byte(uint32_t r) {
 	for (int j = 0; j < 8; ++j) {
 		r = (r & 1? 0: (uint32_t)0xEDB88320L) ^ r >> 1;
@@ -213,13 +161,16 @@ void crc32(const void *data, size_t n_bytes, uint32_t* crc) {
 		*crc = table[(uint8_t)*crc ^ ((uint8_t*)data)[i]] ^ *crc >> 8;
 	}
 }
-
+#endif
 
 
 Filesystem::Filesystem()
 {
-	for (int i=0; i<FATENTRIES; i++) flashErased[i] = false;
+#ifndef ARDUINO
+  for (int i=0; i<FATENTRIES; i++) flashErased[i] = false;
+#endif
 	fsIsDirty = false;
+  fsIsMounted = false;
 }
 
 Filesystem::~Filesystem()
@@ -240,9 +191,13 @@ void Filesystem::DumpFS()
 
 void Filesystem::DumpSector(int sector)
 {
-	printf("Sector: %d", sector);
+#ifdef ARDUINO
+  (void)sector;
+#else
+  printf("Sector: %d", sector);
 	for (int i=0; i<SECTORSIZE; i++) printf("%s%02x ", (i%32)==0?"\n":"", flash[sector][i]);
 	printf("\n");
+#endif
 }
 
 int Filesystem::available()
@@ -405,14 +360,23 @@ int Filesystem::FindFreeSector()
 	return a;
 }
 
+#ifdef ARDUINO
+static uint32_t baseAddr = ((ESP.getSketchSize() + FLASH_SECTOR_SIZE - 1) & (~(FLASH_SECTOR_SIZE - 1)));
+static uint32_t baseSector = baseAddr / FLASH_SECTOR_SIZE;
+#endif
+
 bool Filesystem::EraseSector(int sector) 
 {
 	if ((sector<0) || (sector >= FATENTRIES)) return false;
 
-	printf("EraseSector(%d)\n", sector);
+	printf("EraseSector(%d)\nA", sector);
+ #ifdef ARDUINO
+   return ESP.flashEraseSector(baseSector + sector);
+#else
 	memset(flash[sector], 0, SECTORSIZE);
 	flashErased[sector] = true;
 	return true;
+#endif
 }
 
 bool Filesystem::WriteSector(int sector, const void *data)
@@ -421,6 +385,9 @@ bool Filesystem::WriteSector(int sector, const void *data)
 	if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 	printf("WriteSector(%d, data)\n", sector);
+#ifdef ARDUINO
+  return ESP.flashWrite(baseAddr + sector * FLASH_SECTOR_SIZE, (uint32_t*)data, FLASH_SECTOR_SIZE);
+#else
 	if (!flashErased[sector]) {
 		printf("!!!ERROR, sector not erased!!!\n");
 		return false;
@@ -428,6 +395,7 @@ bool Filesystem::WriteSector(int sector, const void *data)
 	memcpy(flash[sector], data, SECTORSIZE);
 	flashErased[sector] = false;
 	return true;
+#endif
 }
 
 
@@ -436,8 +404,12 @@ bool Filesystem::ReadSector(int sector, void *data)
 	if ((sector<0) || (sector >=FATENTRIES) || !data) return false;
 	if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
+#ifdef ARDUINO
+  return ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE, (uint32_t*)data, FLASH_SECTOR_SIZE);
+#else
 	memcpy(data, flash[sector], SECTORSIZE);
 	return true;
+#endif
 }
 
 bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
@@ -446,7 +418,11 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 
 	// Easy case, everything is aligned and we can just do it...
 	if ( ((offset % 4)==0) && ((len % 4)==0) && (((const uintptr_t)data % 4)==0) ) {
-		memcpy(data, &flash[sector][offset], len);
+#ifdef ARDUINO
+    ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE + offset, (uint32_t*)data, len);
+#else
+    memcpy(data, &flash[sector][offset], len);
+#endif
 		return true;
 	}
 
@@ -469,7 +445,11 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 	int bytesToShift = 0;
 	if (destLenAligned > 0) {
 		// Read the flash aligned into the ram aligned
+#ifdef ARDUINO
+    ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE + srcStartAligned, (uint32_t*)destStartAligned, destLenAligned);
+#else
 		memcpy(destStartAligned, &flash[sector][srcStartAligned], destLenAligned);
+#endif
 		// Move it to the beginning of the buffer
 		shiftLeftBytes = (destStartAligned - destStart) /* account for ram shift */ + (srcStart - srcStartAligned); /* flash shift */
 		bytesToShift = destLenAligned - (srcStart - srcStartAligned); // the alignment flash bytes are thrown away, all else kept
@@ -487,14 +467,20 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 	uint8_t buff[64 + 8]; // bounce buffer, need to account for shift of RAM and flash
 	uint8_t *alignBuff = (uint8_t*)((uintptr_t)(buff+3) & (uintptr_t) ~3); // 32bit aligned pointer into that buffer
 	// Read remainder of flash to the alignment bounce buffer.
+#ifdef ARDUINO
+  ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE + srcStartAligned, (uint32_t*)alignBuff, srcLenAligned);
+#else
 	memcpy(alignBuff, &flash[sector][srcStartAligned], srcLenAligned);
-	// Move it to destination buffer
+#endif
+  // Move it to destination buffer
 	memcpy(destStart, alignBuff + (srcStart - srcStartAligned), srcLen);
 	// Eh voila...easy peasy, lemon squeezy
-	void *simpledata = (void*)malloc(len);
+#ifndef ARDUINO
+  void *simpledata = (void*)malloc(len);
 	memcpy(simpledata, &flash[sector][offset], len);
 	if (memcmp(simpledata, data, len))
 		printf("ERROR!\n");
+#endif
 	return true;
 }
 
@@ -561,44 +547,6 @@ printf("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
 	}
 	return false;
 }
-
-class File
-{
-friend Filesystem;
-
-public:
-	~File() {};
-
-	int write(const void *out, int size);
-	int read(void *data, int size);
-	int seek(int off, int whence);
-	int seek(int off) { return seek(off, SEEK_SET); }
-	int close();
-	int tell();
-	int eof();
-	int size();
-	void name(char *buff, int buffLen);
-	int fputc(int c);
-	int fgetc();
-
-private:
-	File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
-	Filesystem *fs; // Where do I live?
-	int fileIdx; // Which entry
-
-	int32_t writePos; // = offset from 0 in file
-	int32_t readPos; // = offset from 0 in file
-	int32_t curWriteSector; // = current sector in buffer
-	int32_t curWriteSectorOffset; // = offset of byte[0] of the current sector in the file
-	int32_t curReadSector;
-	int32_t curReadSectorOffset;
-	uint8_t *data; // = sector data.  On update, read old sector into it.
-	bool dataDirty; // = flag the data here is dirty
-
-	bool modeAppend; // = flag 
-	bool modeRead; // = flag
-	bool modeWrite; // = flag
-};
 
 File *Filesystem::open(const char *name, const char *mode)
 {
@@ -854,12 +802,17 @@ int File::seek(int off, int whence)
 }
 
 
-
-int main(int argc, char *argv[])
+#ifdef ARDUINO
+void RunFSTest()
+#else
+int main(int argc, char **argv)
+#endif
 {
 	int len;
 	char buff[1001];
+#ifndef ARDUINO
 	srand(time(NULL));
+#endif
 	Filesystem *fs = new Filesystem;
 	fs->mkfs();
 	printf("mount ret = %d\n", fs->mount());
@@ -1011,6 +964,7 @@ int main(int argc, char *argv[])
 
 	f->close();
 
+#ifndef ARDUINO
 	f = fs->open("test.bin", "rb");
 	int sz = f->size();
 	srand(123); // Repeatable test
@@ -1022,6 +976,7 @@ int main(int argc, char *argv[])
 		if (i%100 == 0) printf("++++Loop %d\n", i);
 	}
 	f->close();
+#endif
 
 	f = fs->open("gettysburg.txt", "r");
 	printf("fgetc test: '");
@@ -1039,6 +994,5 @@ int main(int argc, char *argv[])
 
 	delete fs;
 
-	return 0;
 }
 
