@@ -31,6 +31,19 @@
 
 #include "fastromfs.h"
 
+#ifndef DEBUGFASTROMFS
+  #define DEBUGFASTROMFS 0
+#endif
+
+#if DEBUGFASTROMFS
+  #ifdef ARDUINO
+    #define DEBUG_FASTROMFS Serial.printf
+  #else
+    #define DEBUG_FASTROMFS printf
+  #endif
+#else
+  #define DEBUG_FASTROMFS (void)
+#endif
 
 
 #ifndef min
@@ -181,12 +194,16 @@ Filesystem::~Filesystem()
 
 void Filesystem::DumpFS()
 {
-  printf("%-32s - %-5s - %-5s\n", "name", "len", "fat");
+  DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
-    if (fs.fileEntry[i].name[0]) printf("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
+    if (fs.fileEntry[i].name[0]) {
+      DEBUG_FASTROMFS("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
+    }
   }
-  for (int i = 0; i < FATENTRIES; i++) printf("%s%5d:%-5d ", 0 == (i % 8) ? "\n" : "", i, GetFAT(i));
-  printf("\n\n");
+  for (int i = 0; i < FATENTRIES; i++) {
+    DEBUG_FASTROMFS("%s%5d:%-5d ", 0 == (i % 8) ? "\n" : "", i, GetFAT(i));
+  }
+  DEBUG_FASTROMFS("\n\n");
 }
 
 void Filesystem::DumpSector(int sector)
@@ -194,9 +211,9 @@ void Filesystem::DumpSector(int sector)
 #ifdef ARDUINO
   (void)sector;
 #else
-  printf("Sector: %d", sector);
-  for (int i = 0; i < SECTORSIZE; i++) printf("%s%02x ", (i % 32) == 0 ? "\n" : "", flash[sector][i]);
-  printf("\n");
+  DEBUG_FASTROMFS("Sector: %d", sector);
+  for (int i = 0; i < SECTORSIZE; i++) DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", flash[sector][i]);
+  DEBUG_FASTROMFS("\n");
 #endif
 }
 
@@ -300,7 +317,7 @@ int Filesystem::CreateNewFileEntry(const char *name)
 bool Filesystem::unlink(const char *name)
 {
   if (!fsIsMounted) return false;
-  printf("unlink('%s')\n", name);
+  DEBUG_FASTROMFS("unlink('%s')\n", name);
   int idx = FindFileEntryByName(name);
   if (idx < 0) return false;
   int sec = fs.fileEntry[idx].fat;
@@ -371,7 +388,7 @@ bool Filesystem::EraseSector(int sector)
 {
   if ((sector < 0) || (sector >= FATENTRIES)) return false;
 
-  printf("EraseSector(%d)\nA", sector);
+  DEBUG_FASTROMFS("EraseSector(%d)\nA", sector);
 #ifdef ARDUINO
   return ESP.flashEraseSector(baseSector + sector);
 #else
@@ -386,12 +403,12 @@ bool Filesystem::WriteSector(int sector, const void *data)
   if ((sector < 0) || (sector >= FATENTRIES) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
-  printf("WriteSector(%d, data)\n", sector);
+  DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
 #ifdef ARDUINO
   return ESP.flashWrite(baseAddr + sector * FLASH_SECTOR_SIZE, (uint32_t*)data, FLASH_SECTOR_SIZE);
 #else
   if (!flashErased[sector]) {
-    printf("!!!ERROR, sector not erased!!!\n");
+    DEBUG_FASTROMFS("!!!ERROR, sector not erased!!!\n");
     return false;
   }
   memcpy(flash[sector], data, SECTORSIZE);
@@ -481,7 +498,7 @@ bool Filesystem::ReadPartialSector(int sector, int offset, void *data, int len)
   void *simpledata = (void*)malloc(len);
   memcpy(simpledata, &flash[sector][offset], len);
   if (memcmp(simpledata, data, len))
-    printf("ERROR!\n");
+    DEBUG_FASTROMFS("ERROR!\n");
 #endif
   return true;
 }
@@ -510,7 +527,7 @@ bool Filesystem::mkfs()
 bool Filesystem::mount()
 {
   if (fsIsMounted) return false;
-  printf("mount()\n");
+  DEBUG_FASTROMFS("mount()\n");
   int idx = FindNewestFAT();
   if (idx >= 0) {
     if (!ReadSector(idx, &fs)) return false;
@@ -525,14 +542,14 @@ bool Filesystem::mount()
 bool Filesystem::umount()
 {
   if (!fsIsMounted) return false;
-  printf("umount()\n");
+  DEBUG_FASTROMFS("umount()\n");
   if (!FlushFAT()) return false;
   return true;
 }
 
 bool Filesystem::FlushFAT()
 {
-  printf("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
+  DEBUG_FASTROMFS("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
   if (!fsIsMounted || !fsIsDirty) return true; // Nothing to do here...
 
   fs.epoch++;
@@ -555,7 +572,7 @@ File *Filesystem::open(const char *name, const char *mode)
   if (!fsIsMounted) return NULL;
   if (!name || !mode) return NULL;
 
-  printf("open('%s', '%s')\n", name, mode);
+  DEBUG_FASTROMFS("open('%s', '%s')\n", name, mode);
   if (!strcmp(mode, "r") || !strcmp(mode, "rb")) { //  Open text file for reading.  The stream is positioned at the beginning of the file.
     int fidx = FindFileEntryByName(name);
     if (fidx < 0) return NULL;
@@ -733,7 +750,7 @@ int File::write(const void *out, int size)
 
 int File::close()
 {
-  printf("close()\n");
+  DEBUG_FASTROMFS("close()\n");
   if (!modeWrite && !modeAppend) return 0;
   if (!dataDirty) return 0;
   if (!fs->EraseSector(curWriteSector)) return -1;
@@ -828,8 +845,8 @@ int main(int argc, char **argv)
 #endif
   Filesystem *fs = new Filesystem;
   fs->mkfs();
-  printf("mount ret = %d\n", fs->mount());
-  printf("Bytes Free: %d\n", fs->available());
+  DEBUG_FASTROMFS("mount ret = %d\n", fs->mount());
+  DEBUG_FASTROMFS("Bytes Free: %d\n", fs->available());
   File *f = fs->open("test.bin", "w");
   for (int i = 0; i < 200; i++) {
     f->write("0123456789", 10);
@@ -848,7 +865,7 @@ int main(int argc, char **argv)
   f->seek(2);
   len = f->read(buff + 1, 64);
   buff[len + 1] = 0;
-  printf("buff@2='%s'\n", buff + 1);
+  DEBUG_FASTROMFS("buff@2='%s'\n", buff + 1);
   f->close();
   //	exit(1);
 
@@ -856,12 +873,12 @@ int main(int argc, char **argv)
   do {
     len = f->read(buff, 1000);
     buff[1000] = 0;
-    printf("buff='%s'\n", buff);
+    DEBUG_FASTROMFS("buff='%s'\n", buff);
   } while (len);
   f->seek(-998, SEEK_END);
   len = f->read(buff, 1000);
   buff[1000] = 0;
-  printf("buffx='%s'\n", buff);
+  DEBUG_FASTROMFS("buffx='%s'\n", buff);
   f->close();
 
   f = fs->open("test.bin", "r+");
@@ -870,7 +887,7 @@ int main(int argc, char **argv)
   f->seek(4070);
   f->read(buff, 1000);
   buff[1000] = 0;
-  printf("buffx='%s'\n", buff);
+  DEBUG_FASTROMFS("buffx='%s'\n", buff);
   f->close();
 
   f = fs->open("newfile.txt", "w");
@@ -880,33 +897,33 @@ int main(int argc, char **argv)
   f = fs->open("test.bin", "r+");
   f->read(buff, 50);
   buff[50] = 0;
-  printf("buffx='%s'\n", buff);
+  DEBUG_FASTROMFS("buffx='%s'\n", buff);
   f->close();
 
   f = fs->open("newfile.txt", "r+");
   f->read(buff, 50);
   buff[50] = 0;
-  printf("buffx='%s'\n", buff);
+  DEBUG_FASTROMFS("buffx='%s'\n", buff);
   f->close();
 
-  printf("Bytes Free: %d\n", fs->available());
+  DEBUG_FASTROMFS("Bytes Free: %d\n", fs->available());
 
   fs->DumpFS();
 
-  printf("newfile.txt: %d bytes\n", fs->fsize("newfile.txt"));
-  printf("test.bin: %d bytes\n", fs->fsize("test.bin"));
+  DEBUG_FASTROMFS("newfile.txt: %d bytes\n", fs->fsize("newfile.txt"));
+  DEBUG_FASTROMFS("test.bin: %d bytes\n", fs->fsize("test.bin"));
 
 
 
   fs->umount();
 
-  printf("UNMOUNT/REMOUNT...\n");
+  DEBUG_FASTROMFS("UNMOUNT/REMOUNT...\n");
   fs->mount();
   Dir *d = fs->opendir();
   do {
     struct dirent *de = fs->readdir(d);
     if (!de) break;
-    printf("File: '%s', len=%d\n", de->name, de->len);
+    DEBUG_FASTROMFS("File: '%s', len=%d\n", de->name, de->len);
   } while (1);
   fs->closedir(d);
 
@@ -916,21 +933,21 @@ int main(int argc, char **argv)
   do {
     struct dirent *de = fs->readdir(d);
     if (!de) break;
-    printf("File: '%s', len=%d\n", de->name, de->len);
+    DEBUG_FASTROMFS("File: '%s', len=%d\n", de->name, de->len);
   } while (1);
   fs->closedir(d);
 
   f = fs->open("gettysburg.txt", "a+");
   f->read(buff, 30);
   buff[30] = 0;
-  printf("buff='%s', tell=%d\n", buff, f->tell());
+  DEBUG_FASTROMFS("buff='%s', tell=%d\n", buff, f->tell());
   f->write("I forget the rest", 17);
-  printf("appended read = '");
+  DEBUG_FASTROMFS("appended read = '");
   while (int l = f->read(buff, 30)) {
     buff[l] = 0;
-    printf("%s", buff);
+    DEBUG_FASTROMFS("%s", buff);
   }
-  printf("'\n");
+  DEBUG_FASTROMFS("'\n");
   f->close();
 
 
@@ -947,13 +964,13 @@ int main(int argc, char **argv)
     if (c == 0) zeros++;
     else break;
   } while (1);
-  printf("I found %d zeros before the text: '", zeros);
+  DEBUG_FASTROMFS("I found %d zeros before the text: '", zeros);
   do {
-    printf("%c", c);
+    DEBUG_FASTROMFS("%c", c);
     f->read(&c, 1);
     if (c == 0) break;
   } while (1);
-  printf("'\n");
+  DEBUG_FASTROMFS("'\n");
   f->close();
 
   f = fs->open("gettysburg.txt", "r");
@@ -962,7 +979,7 @@ int main(int argc, char **argv)
     f->read(&c, 1);
     flencalc++;
   }
-  printf("LEN=%d, calcLEN=%d\n", f->size(), flencalc);
+  DEBUG_FASTROMFS("LEN=%d, calcLEN=%d\n", f->size(), flencalc);
   f->close();
 
   f = fs->open("bytebybyte.bin", "w+");
@@ -976,7 +993,7 @@ int main(int argc, char **argv)
     if (x == 1) zeros++;
     else break;
   } while (1);
-  printf("I read %d bytes\n", zeros);
+  DEBUG_FASTROMFS("I read %d bytes\n", zeros);
 
   f->close();
 
@@ -989,19 +1006,19 @@ int main(int argc, char **argv)
     int len = rand() % 100;
     f->seek(off);
     f->read(buff, len);
-    if (i % 100 == 0) printf("++++Loop %d\n", i);
+    if (i % 100 == 0) DEBUG_FASTROMFS("++++Loop %d\n", i);
   }
   f->close();
 #endif
 
   f = fs->open("gettysburg.txt", "r");
-  printf("fgetc test: '");
+  DEBUG_FASTROMFS("fgetc test: '");
   while (1) {
     int c = f->fgetc();
     if (c < 0) break;
-    printf("%c", (char)c);
+    DEBUG_FASTROMFS("%c", (char)c);
   }
-  printf("'\n");
+  DEBUG_FASTROMFS("'\n");
   f->close();
 
 
