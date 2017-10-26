@@ -22,7 +22,7 @@
 #define _ESP8266FASTROMFS_H
 
 // Enable debugging set to 1
-#define DEBUGFASTROMFS 1
+#define DEBUGFASTROMFS 0
 
 // Constants that define filesystem structure
 #define FSMAGIC 0xdead0beef0f00dll
@@ -37,8 +37,8 @@
 
 
 
-class Filesystem;
-class File;
+class FastROMFilesystem;
+class FastROMFile;
 
 typedef void Dir; // Opaque for the masses
 
@@ -70,16 +70,16 @@ typedef union {
 
 
 
-class Filesystem
+class FastROMFilesystem
 {
-    friend File;
+    friend FastROMFile;
   public:
-    Filesystem();
-    ~Filesystem();
+    FastROMFilesystem();
+    ~FastROMFilesystem();
     bool mkfs();
     bool mount();
     bool umount();
-    File *open(const char *name, const char *mode);
+    FastROMFile *open(const char *name, const char *mode);
     bool unlink(const char *name);
     bool exists(const char *name);
     bool rename(const char *src, const char *dest);
@@ -131,15 +131,11 @@ class Filesystem
 
 
 
-class File
+class FastROMFile
 {
-    friend Filesystem;
+    friend FastROMFilesystem;
 
   public:
-    ~File() {
-      free(data);
-    };
-
     int write(const void *out, int size);
     int read(void *data, int size);
     int seek(int off, int whence);
@@ -155,8 +151,11 @@ class File
     int fgetc();
 
   private:
-    File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append, bool eraseFirstSector);
-    Filesystem *fs; // Where do I live?
+    // Like matter, mere mortals can neither create nor destroy this..only the FastROMFilesystem has that power
+    FastROMFile(FastROMFilesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append, bool eraseFirstSector);
+    ~FastROMFile();
+    
+    FastROMFilesystem *fs; // Where do I live?
     int fileIdx; // Which entry
 
     int32_t writePos; // = offset from 0 in file
