@@ -35,14 +35,10 @@
   #define DEBUGFASTROMFS 0
 #endif
 
-#if DEBUGFASTROMFS
-  #ifdef ARDUINO
-    #define DEBUG_FASTROMFS Serial.printf
-  #else
-    #define DEBUG_FASTROMFS printf
-  #endif
+#ifdef ARDUINO
+  #define DEBUG_FASTROMFS if (DEBUGFASTROMFS) Serial.printf
 #else
-  #define DEBUG_FASTROMFS (void)
+  #define DEBUG_FASTROMFS if (DEBUGFASTROMFS) printf
 #endif
 
 
@@ -679,10 +675,10 @@ int FastROMFile::eof()
   return false;  //TODO...what does eof() on a writable only file mean?
 }
 
-int FastROMFile::write(const void *out, int size)
+size_t FastROMFile::write(const uint8_t *out, size_t size)
 {
   if (!size || !out || !modeWrite) return 0;
-  int writtenBytes = 0;
+  size_t writtenBytes = 0;
 
   // Make sure we're writing somewhere within the current sector
   if (! ( (curWriteSectorOffset <= writePos) && ((curWriteSectorOffset + SECTORSIZE) > writePos) ) ) {
@@ -747,7 +743,7 @@ int FastROMFile::write(const void *out, int size)
     fs->SetFileEntryLen(fileIdx, max(fs->GetFileEntryLen(fileIdx), writePos)); // Potentially we just extended the file
     // Reduce bytes available to write, increment data pointer
     size -= amountWritableInThisSector;
-    out = reinterpret_cast<const char*>(out) + amountWritableInThisSector;
+    out = reinterpret_cast<const uint8_t*>(out) + amountWritableInThisSector;
   }
 
   return writtenBytes;
@@ -764,6 +760,16 @@ int FastROMFile::close()
   return ret;
 }
 
+
+int FastROMFile::sync()
+{
+  if (!modeWrite && !modeAppend) return 0;
+  if (!dataDirty) return 0;
+  if (!fs->EraseSector(curWriteSector)) return -1;
+  if (!fs->WriteSector(curWriteSector, data)) return -1;
+  dataDirty = false;
+  return fs->FlushFAT();
+}
 
 int FastROMFile::read(void *in, int size)
 {

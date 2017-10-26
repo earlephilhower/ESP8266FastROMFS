@@ -131,12 +131,12 @@ class FastROMFilesystem
 
 
 
-class FastROMFile
+class FastROMFile : public Stream
 {
     friend FastROMFilesystem;
 
   public:
-    int write(const void *out, int size);
+    size_t write(const uint8_t *out, size_t size) override;
     int read(void *data, int size);
     bool seek(int off, int whence);
     bool seek(int off) {
@@ -149,6 +149,38 @@ class FastROMFile
     void name(char *buff, int buffLen);
     int fputc(int c);
     int fgetc();
+    int sync();
+
+  public:
+    // Stream stuff
+    size_t write(uint8_t c) override {
+      return write(&c, 1);
+    };
+    size_t write(const char *buffer, size_t size) {
+        return write((const uint8_t *) buffer, size);
+    }
+//    size_t write(const uint8_t *buf, size_t size) override {
+//      return (size_t) write((const void *)buf, (size_t)size);
+//    };
+    int available() override {
+        return size() - tell();
+    };
+    int read() override {
+      return fgetc();
+    };
+    int peek() override {
+      int pos = tell();
+      int c = fgetc();
+      seek(pos);
+      return c;
+    };
+    void flush() override {
+      sync();
+    };
+    size_t readBytes(char *buffer, size_t length) override {
+        return (size_t)read((void*)buffer, (int) length);
+    };
+
 
   private:
     // Like matter, mere mortals can neither create nor destroy this..only the FastROMFilesystem has that power
