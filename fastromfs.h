@@ -131,7 +131,7 @@ class File
 friend Filesystem;
 
 public:
-  ~File() {};
+  ~File() { free(data); };
 
   int write(const void *out, int size);
   int read(void *data, int size);
@@ -146,7 +146,7 @@ public:
   int fgetc();
 
 private:
-  File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append);
+  File(Filesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append, bool eraseFirstSector);
   Filesystem *fs; // Where do I live?
   int fileIdx; // Which entry
 
