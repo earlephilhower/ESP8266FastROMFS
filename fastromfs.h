@@ -22,7 +22,7 @@
 #define _ESP8266FASTROMFS_H
 
 // Enable debugging set to 1
-#define DEBUGFASTROMFS 1
+#define DEBUGFASTROMFS 0
 
 // Constants that define filesystem structure
 #define FSMAGIC 0xdead0beef0f00dll

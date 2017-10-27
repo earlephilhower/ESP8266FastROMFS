@@ -498,7 +498,7 @@ bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, in
   uint8_t *alignBuff = (uint8_t*)((uintptr_t)(buff + 3) & (uintptr_t) ~3); // 32bit aligned pointer into that buffer
   // Read remainder of flash to the alignment bounce buffer.
 #ifdef ARDUINO
-  // Check if we have cached this data (only valid if it fits in 1 32-bit word
+  // Check if we have cached this data (only valid if it fits in 1 32-bit word)
   if ( (lastFlashSector == sector) && (lastFlashSectorOffset == srcStartAligned) && (srcLenAligned == 4) ) {
       *(uint32_t*)alignBuff = lastFlashSectorData;
   } else {

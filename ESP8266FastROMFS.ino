@@ -17,8 +17,8 @@ void DoFastROMFS()
     return;
   }
 
-  uint8_t data[256];
-  for (int i=0; i<256; i++) data[i] = (uint8_t) i;
+  uint8_t data[257];
+  for (int i=0; i<257; i++) data[i] = (uint8_t) i;
 
   Serial.printf("Creating %dKB file, may take a while...\n", TESTSIZEKB);
   long start = millis();
@@ -50,6 +50,20 @@ void DoFastROMFS()
   stop = millis();
   Serial.printf("==> Time to read %dKB sequentially in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
 
+  Serial.printf("Reading %dKB file MISALIGNED in flash and RAM sequentially in 256b chunks\n", TESTSIZEKB);
+  start = millis();
+  f = fs->open("testwrite.bin", "r");
+  f->read();
+  for (int i=0; i<TESTSIZEKB; i++) {
+    for (int j=0; j<4; j++)
+      f->read(data+1, 256);
+  }
+  f->close();
+  stop = millis();
+  Serial.printf("==> Time to read %dKB sequentially MISALIGNED in flash and RAM in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
+
+
+  
   Serial.printf("Reading %dKB file in reverse by 256b chunks\n", TESTSIZEKB);
   start = millis();
   f = fs->open("testwrite.bin", "r");
@@ -143,6 +157,19 @@ void DoSPIFFS()
   stop = millis();
   Serial.printf("==> Time to read %dKB sequentially in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
 
+  Serial.printf("Reading %dKB file MISALIGNED in flash and RAM sequentially in 256b chunks\n", TESTSIZEKB);
+  start = millis();
+  f = SPIFFS.open("/testwrite.bin", "r");
+  f.read();
+  for (int i=0; i<TESTSIZEKB; i++) {
+    for (int j=0; j<4; j++)
+      f.read(data+1, 256);
+  }
+  f.close();
+  stop = millis();
+  Serial.printf("==> Time to read %dKB sequentially MISALIGNED in flash and RAM in 256b chunks = %ld milliseconds = %ld bytes/s\n", TESTSIZEKB, stop - start, TESTSIZEKB*1024 / (stop-start) * 1000);
+
+
   Serial.printf("Reading %dKB file in reverse by 256b chunks\n", TESTSIZEKB);
   start = millis();
   f = SPIFFS.open("/testwrite.bin", "r");
@@ -201,8 +228,8 @@ void setup()
   Serial.printf("sketchsize= %08x\n", ESP.getSketchSize());
   Serial.printf("phyaddr= %08x\n", SPIFFS_PHYS_ADDR);
   Serial.printf("baseaddr = %08x\n", (void *)((ESP.getSketchSize() + FLASH_SECTOR_SIZE - 1) & (~(FLASH_SECTOR_SIZE - 1))));
-RunFSTest();
-  return;
+//RunFSTest();
+//  return;
   DoFastROMFS();
   DoSPIFFS();
 }
