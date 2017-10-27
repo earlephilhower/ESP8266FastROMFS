@@ -1,5 +1,5 @@
-#include "fastromfs.h"
-#include "FS.h"
+#include <Arduino.h>
+#include <ESP8266FastROMFS.h>
 
 #define TESTSIZEKB 512
 
@@ -214,22 +214,11 @@ void DoSPIFFS()
 
 }
 
-extern "C" uint32_t _SPIFFS_start;
-extern "C" uint32_t _SPIFFS_end;
-#define SPIFFS_PHYS_ADDR ((uint32_t) (&_SPIFFS_start) - 0x40200000)
-
 extern void RunFSTest();
 void setup()
 {
   Serial.begin(115200);
   
-  Serial.printf("spiffsKB is %ld\n", (long)( ((uint32_t) (&_SPIFFS_end) - (uint32_t) (&_SPIFFS_start)) / (1) ));
-  Serial.printf("spiffbegin = %08x\n", _SPIFFS_start);
-  Serial.printf("sketchsize= %08x\n", ESP.getSketchSize());
-  Serial.printf("phyaddr= %08x\n", SPIFFS_PHYS_ADDR);
-  Serial.printf("baseaddr = %08x\n", (void *)((ESP.getSketchSize() + FLASH_SECTOR_SIZE - 1) & (~(FLASH_SECTOR_SIZE - 1))));
-//RunFSTest();
-//  return;
   DoFastROMFS();
   DoSPIFFS();
 }
