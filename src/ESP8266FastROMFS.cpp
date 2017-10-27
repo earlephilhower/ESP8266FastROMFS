@@ -105,21 +105,38 @@ void FastROMFilesystem::SetFileEntryFAT(int idx, int fat)
   fsIsDirty = true;
 }
 
+#ifndef ARDUINO
+void FastROMFilesystem::DumpToFile(FILE *f)
+{
+  if (fsIsMounted) return; // Can't dump a mounted FS!
+  for (size_t i=0; i<totalSectors; i++)
+    fwrite(flash[i], SECTORSIZE, 1, f);
+}
+
+void FastROMFilesystem::LoadFromFile(FILE *f)
+{
+  if (fsIsMounted) return;
+  fread(flash[0], SECTORSIZE, 1, f);
+  memcpy(&fs, flash[0], SECTORSIZE);
+  for (size_t i=1; i<fs.sectors; i++)
+    fread(flash[i], SECTORSIZE, 1, f);
+}
+#endif
 
 
-Dir *FastROMFilesystem::opendir()
+FastROMFSDir *FastROMFilesystem::opendir()
 {
   if (!fsIsMounted) return NULL;
-  struct dirent *de = (struct dirent *)malloc(sizeof(dirent));
+  struct FastROMFSDirent *de = (struct FastROMFSDirent *)malloc(sizeof(struct FastROMFSDirent));
   if (!de) return NULL; // OOM
   de->off = -1;
   return (void*)de;
 }
 
-struct dirent *FastROMFilesystem::readdir(Dir *dir)
+struct FastROMFSDirent *FastROMFilesystem::readdir(FastROMFSDir *dir)
 {
   if (!fsIsMounted) return NULL;
-  struct dirent *de = reinterpret_cast<struct dirent *>(dir);
+  struct FastROMFSDirent *de = reinterpret_cast<struct FastROMFSDirent *>(dir);
   de->off++;
   while (de->off < FILEENTRIES) {
     char name[NAMELEN];
@@ -135,7 +152,7 @@ struct dirent *FastROMFilesystem::readdir(Dir *dir)
   return NULL;
 }
 
-int FastROMFilesystem::closedir(Dir *dir)
+int FastROMFilesystem::closedir(FastROMFSDir *dir)
 {
   if (!fsIsMounted) return false;
   if (!dir) return -1;
@@ -188,6 +205,7 @@ FastROMFilesystem::FastROMFilesystem()
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
   for (int i = 0; i < FATENTRIES; i++) flashErased[i] = false;
+  totalSectors = FATENTRIES;
 #endif
   fsIsDirty = false;
   fsIsMounted = false;
@@ -201,7 +219,7 @@ FastROMFilesystem::~FastROMFilesystem()
 
 void FastROMFilesystem::DumpFS()
 {
-  DEBUG_FASTROMFS("fs.epoch = %ld\n, fs.sectors = %d\n", fs.epoch, fs.epoch);
+  DEBUG_FASTROMFS("fs.epoch = %ld\n, fs.sectors = %ld\n", fs.epoch, fs.sectors);
   
   DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
@@ -408,14 +426,15 @@ bool FastROMFilesystem::EraseSector(int sector)
 
 bool FastROMFilesystem::WriteSector(int sector, const void *data)
 {
+  DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
+
   if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
+#ifdef ARDUINO
   // If we're messing with this sector, invalidate any cached data corresponding to it
   if (sector == lastFlashSector) lastFlashSector = -1;
 
-  DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
-#ifdef ARDUINO
   return ESP.flashWrite(baseAddr + sector * FLASH_SECTOR_SIZE, (uint32_t*)data, FLASH_SECTOR_SIZE);
 #else
   if (!flashErased[sector]) {
@@ -570,6 +589,7 @@ bool FastROMFilesystem::umount()
   if (!fsIsMounted) return false;
   DEBUG_FASTROMFS("umount()\n");
   if (!FlushFAT()) return false;
+  fsIsMounted = false;
   return true;
 }
 

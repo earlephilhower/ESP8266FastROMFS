@@ -90,9 +90,9 @@ int main(int argc, char **argv)
 
   DEBUG_FASTROMFS("UNMOUNT/REMOUNT...\n");
   fs->mount();
-  Dir *d = fs->opendir();
+  FastROMFSDir *d = fs->opendir();
   do {
-    struct dirent *de = fs->readdir(d);
+    struct FastROMFSDirent *de = fs->readdir(d);
     if (!de) break;
     DEBUG_FASTROMFS("File: '%s', len=%d\n", de->name, de->len);
   } while (1);
@@ -102,7 +102,7 @@ int main(int argc, char **argv)
   fs->rename("newfile.txt", "gettysburg.txt");
   d = fs->opendir();
   do {
-    struct dirent *de = fs->readdir(d);
+    struct FastROMFSDirent *de = fs->readdir(d);
     if (!de) break;
     DEBUG_FASTROMFS("File: '%s', len=%d\n", de->name, de->len);
   } while (1);

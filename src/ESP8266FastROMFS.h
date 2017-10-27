@@ -22,7 +22,9 @@
 #define _ESP8266FASTROMFS_H
 
 // Enable debugging set to 1
-#define DEBUGFASTROMFS 0
+#ifndef DEBUGFASTROMFS
+  #define DEBUGFASTROMFS 0
+#endif
 
 // Constants that define filesystem structure
 #define FSMAGIC 0xdead0beef0f00dll
@@ -41,9 +43,9 @@
 class FastROMFilesystem;
 class FastROMFile;
 
-typedef void Dir; // Opaque for the masses
+typedef void FastROMFSDir; // Opaque for the masses
 
-struct dirent {
+struct FastROMFSDirent {
   int off;
   char name[NAMELEN + 1]; // Ensure space for \0
   int len;
@@ -70,7 +72,10 @@ typedef union {
   };
 } FilesystemInFlash;
 
-
+#ifndef ARDUINO
+//TODO - this should be dynamic in the uploader
+#define FATENTRIES 700
+#endif
 
 
 class FastROMFilesystem
@@ -88,16 +93,22 @@ class FastROMFilesystem
     bool rename(const char *src, const char *dest);
     int available();
     int fsize(const char *name);
-    Dir *opendir(const char *ignored) {
+    FastROMFSDir *opendir(const char *ignored) {
       (void)ignored;
       return opendir();
     };
-    Dir *opendir();
-    struct dirent *readdir(Dir *dir);
-    int closedir(Dir *dir);
+    FastROMFSDir *opendir();
+    struct FastROMFSDirent *readdir(FastROMFSDir *dir);
+    int closedir(FastROMFSDir *dir);
 
     void DumpFS();
     void DumpSector(int sector);
+
+#ifndef ARDUINO
+  public:
+    void DumpToFile(FILE *f);
+    void LoadFromFile(FILE *f);
+#endif
 
   protected:
     int GetFAT(int idx);
@@ -125,11 +136,11 @@ class FastROMFilesystem
     FilesystemInFlash fs;
     bool fsIsMounted;
     bool fsIsDirty;
+    uint32_t totalSectors;
 #ifdef ARDUINO
     // As-defined at compile-time, but the FS metadata may say something different...
     uint32_t baseAddr;
     uint32_t baseSector;
-    uint32_t totalSectors;
     
     // Cache the last misaligned read data just incase we have some kind of sequential 1-byte scanning going on
     // Very special-case, but it occurs in many applications
@@ -144,9 +155,12 @@ class FastROMFilesystem
 };
 
 
-
-
+#ifdef ARDUINO
 class FastROMFile : public Stream
+#else
+#define override
+class FastROMFile
+#endif
 {
     friend FastROMFilesystem;
 
@@ -165,6 +179,9 @@ class FastROMFile : public Stream
     int fputc(int c);
     int fgetc();
     int sync();
+
+  public: // SPIFFS compatibility stuff
+    int position() { return tell(); };
 
   public:
     // Stream stuff
@@ -218,6 +235,10 @@ class FastROMFile : public Stream
     bool modeRead; // = flag
     bool modeWrite; // = flag
 };
+
+#ifndef ARDUINO
+#undef override
+#endif
 
 #endif
 
