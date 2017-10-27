@@ -184,6 +184,8 @@ FastROMFilesystem::FastROMFilesystem()
   baseAddr = ((uint32_t) (&_SPIFFS_start) - 0x40200000); // Magic constants taken from SPIFF_API.cpp
   baseSector = baseAddr / SECTORSIZE;
   totalSectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
+
+  lastFlashSector = -1; // Invalidate the 1-word cache
 #else
   for (int i = 0; i < FATENTRIES; i++) flashErased[i] = false;
 #endif
@@ -393,6 +395,9 @@ bool FastROMFilesystem::EraseSector(int sector)
 
   DEBUG_FASTROMFS("EraseSector(%d)\n", sector);
 #ifdef ARDUINO
+  // If we're messing with this sector, invalidate any cached data corresponding to it
+  if (sector == lastFlashSector) lastFlashSector = -1;
+
   return ESP.flashEraseSector(baseSector + sector);
 #else
   memset(flash[sector], 0, SECTORSIZE);
@@ -405,6 +410,9 @@ bool FastROMFilesystem::WriteSector(int sector, const void *data)
 {
   if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
+
+  // If we're messing with this sector, invalidate any cached data corresponding to it
+  if (sector == lastFlashSector) lastFlashSector = -1;
 
   DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
 #ifdef ARDUINO
@@ -490,7 +498,20 @@ bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, in
   uint8_t *alignBuff = (uint8_t*)((uintptr_t)(buff + 3) & (uintptr_t) ~3); // 32bit aligned pointer into that buffer
   // Read remainder of flash to the alignment bounce buffer.
 #ifdef ARDUINO
-  ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE + srcStartAligned, (uint32_t*)alignBuff, srcLenAligned);
+  // Check if we have cached this data (only valid if it fits in 1 32-bit word
+  if ( (lastFlashSector == sector) && (lastFlashSectorOffset == srcStartAligned) && (srcLenAligned == 4) ) {
+      *(uint32_t*)alignBuff = lastFlashSectorData;
+  } else {
+    // Nope, read it out
+    ESP.flashRead(baseAddr + sector * FLASH_SECTOR_SIZE + srcStartAligned, (uint32_t*)alignBuff, srcLenAligned);
+  
+    // Store the read out data for potential use by subsequent ReadPartials if it was a single 32-bit read
+    if (srcLenAligned == 4) {
+      lastFlashSector = sector;
+      lastFlashSectorOffset = srcStartAligned;
+      lastFlashSectorData = *(uint32_t*)alignBuff;
+    }
+  }
 #else
   memcpy(alignBuff, &flash[sector][srcStartAligned], srcLenAligned);
 #endif

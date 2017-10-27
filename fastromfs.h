@@ -126,9 +126,17 @@ class FastROMFilesystem
     bool fsIsMounted;
     bool fsIsDirty;
 #ifdef ARDUINO
+    // As-defined at compile-time, but the FS metadata may say something different...
     uint32_t baseAddr;
     uint32_t baseSector;
     uint32_t totalSectors;
+    
+    // Cache the last misaligned read data just incase we have some kind of sequential 1-byte scanning going on
+    // Very special-case, but it occurs in many applications
+    int lastFlashSector;
+    int lastFlashSectorOffset;
+    uint32_t lastFlashSectorData;
+
 #else
     uint8_t flash[FATENTRIES][SECTORSIZE];
     bool flashErased[FATENTRIES];

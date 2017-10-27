@@ -201,8 +201,8 @@ void setup()
   Serial.printf("sketchsize= %08x\n", ESP.getSketchSize());
   Serial.printf("phyaddr= %08x\n", SPIFFS_PHYS_ADDR);
   Serial.printf("baseaddr = %08x\n", (void *)((ESP.getSketchSize() + FLASH_SECTOR_SIZE - 1) & (~(FLASH_SECTOR_SIZE - 1))));
-//RunFSTest();
-//  return;
+RunFSTest();
+  return;
   DoFastROMFS();
   DoSPIFFS();
 }
