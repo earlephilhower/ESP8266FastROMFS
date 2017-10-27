@@ -22,15 +22,16 @@
 #define _ESP8266FASTROMFS_H
 
 // Enable debugging set to 1
-#define DEBUGFASTROMFS 0
+#define DEBUGFASTROMFS 1
 
 // Constants that define filesystem structure
 #define FSMAGIC 0xdead0beef0f00dll
 #define SECTORSIZE 4096
-#define FSSIZEMB 3
-#define FATENTRIES (FSSIZEMB * 1024 * 1024 / 4096)
-#define FATBYTES ((FATENTRIES * 12) / 8)
-#define FILEENTRIES ((int)((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry)))
+//#define FSSIZEMB 3
+//#define FATENTRIES (FSSIZEMB * 1024 * 1024 / 4096)
+//#define FATBYTES ((FATENTRIES * 12) / 8)
+//#define FILEENTRIES ((int)((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry)))
+#define FILEENTRIES 64
 #define FATEOF 0xfff
 #define FATCOPIES 8
 #define NAMELEN 24
@@ -61,9 +62,11 @@ typedef union {
   struct {
     uint64_t magic;
     int64_t epoch; // If you roll over this, well, you're amazing
-    uint8_t fat[ FATBYTES ]; // 12-bit packed, use accessors to get in here!
-    FileEntry fileEntry[ FILEENTRIES ];
+    uint32_t sectors; // How many sectors in the filesystem, including this one!
     uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
+    FileEntry fileEntry[ FILEENTRIES ];
+    // fat[] is defined as 1-byte here, but in reality it's from 0...sectors as defined above
+    uint8_t fat[ 1/*FATBYTES*/ ]; // 12-bit packed, use accessors to get in here!  
   };
 } FilesystemInFlash;
 
@@ -122,7 +125,11 @@ class FastROMFilesystem
     FilesystemInFlash fs;
     bool fsIsMounted;
     bool fsIsDirty;
-#ifndef ARDUINO
+#ifdef ARDUINO
+    uint32_t baseAddr;
+    uint32_t baseSector;
+    uint32_t totalSectors;
+#else
     uint8_t flash[FATENTRIES][SECTORSIZE];
     bool flashErased[FATENTRIES];
 #endif

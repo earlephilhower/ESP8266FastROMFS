@@ -173,9 +173,18 @@ void crc32(const void *data, size_t n_bytes, uint32_t* crc) {
 #endif
 
 
+#ifdef ARDUINO
+extern "C" uint32_t _SPIFFS_start;
+extern "C" uint32_t _SPIFFS_end;
+#endif
+
 FastROMFilesystem::FastROMFilesystem()
 {
-#ifndef ARDUINO
+#ifdef ARDUINO
+  baseAddr = ((uint32_t) (&_SPIFFS_start) - 0x40200000); // Magic constants taken from SPIFF_API.cpp
+  baseSector = baseAddr / SECTORSIZE;
+  totalSectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
+#else
   for (int i = 0; i < FATENTRIES; i++) flashErased[i] = false;
 #endif
   fsIsDirty = false;
@@ -190,13 +199,15 @@ FastROMFilesystem::~FastROMFilesystem()
 
 void FastROMFilesystem::DumpFS()
 {
+  DEBUG_FASTROMFS("fs.epoch = %ld\n, fs.sectors = %d\n", fs.epoch, fs.epoch);
+  
   DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
     if (fs.fileEntry[i].name[0]) {
       DEBUG_FASTROMFS("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
     }
   }
-  for (int i = 0; i < FATENTRIES; i++) {
+  for (int i = 0; i < fs.sectors; i++) {
     DEBUG_FASTROMFS("%s%5d:%-5d ", 0 == (i % 8) ? "\n" : "", i, GetFAT(i));
   }
   DEBUG_FASTROMFS("\n\n");
@@ -217,7 +228,7 @@ int FastROMFilesystem::available()
 {
   if (!fsIsMounted) return false;
   int avail = 0;
-  for (int i = 0; i < FATENTRIES; i++) {
+  for (int i = 0; i < fs.sectors; i++) {
     if (GetFAT(i) == 0) avail += SECTORSIZE;
   }
   return avail;
@@ -331,7 +342,7 @@ bool FastROMFilesystem::unlink(const char *name)
 
 int FastROMFilesystem::GetFAT(int idx)
 {
-  if ((idx < 0) || (idx >= FATENTRIES)) return -1;
+  if ((idx < 0) || (idx >= fs.sectors)) return -1;
 
   int bo = (idx / 2) * 3;
   int ret;
@@ -349,7 +360,7 @@ int FastROMFilesystem::GetFAT(int idx)
 
 void FastROMFilesystem::SetFAT(int idx, int val)
 {
-  if ((idx < 0) || (idx >= FATENTRIES)) return;
+  if ((idx < 0) || (idx >= fs.sectors)) return;
 
   int bo = (idx / 2) * 3;
   if (idx & 1) {
@@ -367,24 +378,20 @@ void FastROMFilesystem::SetFAT(int idx, int val)
 
 int FastROMFilesystem::FindFreeSector()
 {
-  int a = rand() % FATENTRIES;
-  for (int i = 0; (i < FATENTRIES) && (GetFAT(a) != 0);  i++, a = (a + 1) % FATENTRIES) {
+  int a = rand() % fs.sectors;
+  for (int i = 0; (i < fs.sectors) && (GetFAT(a) != 0);  i++, a = (a + 1) % fs.sectors) {
     /*empty*/
   }
   if (GetFAT(a) != 0) return -1;
   return a;
 }
 
-#ifdef ARDUINO
-static uint32_t baseAddr = ((ESP.getSketchSize() + FLASH_SECTOR_SIZE - 1) & (~(FLASH_SECTOR_SIZE - 1)));
-static uint32_t baseSector = baseAddr / FLASH_SECTOR_SIZE;
-#endif
 
 bool FastROMFilesystem::EraseSector(int sector)
 {
-  if ((sector < 0) || (sector >= FATENTRIES)) return false;
+  if ((sector < 0) || (sector >= fs.sectors)) return false;
 
-  DEBUG_FASTROMFS("EraseSector(%d)\nA", sector);
+  DEBUG_FASTROMFS("EraseSector(%d)\n", sector);
 #ifdef ARDUINO
   return ESP.flashEraseSector(baseSector + sector);
 #else
@@ -396,7 +403,7 @@ bool FastROMFilesystem::EraseSector(int sector)
 
 bool FastROMFilesystem::WriteSector(int sector, const void *data)
 {
-  if ((sector < 0) || (sector >= FATENTRIES) || !data) return false;
+  if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
   DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
@@ -416,7 +423,7 @@ bool FastROMFilesystem::WriteSector(int sector, const void *data)
 
 bool FastROMFilesystem::ReadSector(int sector, void *data)
 {
-  if ((sector < 0) || (sector >= FATENTRIES) || !data) return false;
+  if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 #ifdef ARDUINO
@@ -429,7 +436,7 @@ bool FastROMFilesystem::ReadSector(int sector, void *data)
 
 bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 {
-  if ((sector < 0) || (sector >= FATENTRIES) || !data || (len < 0) || (offset < 0) || (offset + len > SECTORSIZE)) return false;
+  if ((sector < 0) || (sector >= fs.sectors) || !data || (len < 0) || (offset < 0) || (offset + len > SECTORSIZE)) return false;
 
   // Easy case, everything is aligned and we can just do it...
   if ( ((offset % 4) == 0) && ((len % 4) == 0) && (((const uintptr_t)data % 4) == 0) ) {
@@ -505,6 +512,7 @@ bool FastROMFilesystem::mkfs()
   memset(&fs, 0, sizeof(fs));
   fs.magic = FSMAGIC;
   fs.epoch = 1;
+  fs.sectors = totalSectors;
   for (int i = 0; i < FATCOPIES; i++) {
     SetFAT(i, FATEOF);
   }
@@ -512,6 +520,7 @@ bool FastROMFilesystem::mkfs()
     if (!EraseSector(i)) return false;
     if (!WriteSector(i, &fs)) return false;
   }
+  // Fake Flush() out to ensure we're written...
   fsIsMounted = true;
   fsIsDirty = true;
   FlushFAT();
