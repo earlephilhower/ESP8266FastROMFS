@@ -2,8 +2,10 @@
 #include <ESP8266FastROMFS.h>
 
 #ifdef ARDUINO
+#define DEBUG_FASTROMFS Serial.printf
 void RunFSTest()
 #else
+#define DEBUG_FASTROMFS printf
 int main(int argc, char **argv)
 #endif
 {

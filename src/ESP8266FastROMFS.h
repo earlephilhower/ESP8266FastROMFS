@@ -62,7 +62,7 @@ typedef union {
   struct {
     uint64_t magic;
     int64_t epoch; // If you roll over this, well, you're amazing
-    uint32_t sectors; // How many sectors in the filesystem, including this one!
+    int32_t sectors; // How many sectors in the filesystem, including this one!
     uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
     FileEntry fileEntry[ FILEENTRIES ];
     // fat[] is defined as 1-byte here, but in reality it's from 0...sectors as defined above

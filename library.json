@@ -1,0 +1,23 @@
+{
+    "name": "ESP8266FastROMFS",
+    "description": "Higher speed flash filesystem for read-mostly applications",
+    "keywords": "ESP8266, Filesystem, flash",
+    "authors": [
+        {
+            "name": "Earle F. Philhower, III",
+            "email": "earlephilhower@yahoo.com",
+            "url": "https://github.com/earlephilhower/ESP8266FastROMFS",
+            "maintainer": true
+        }
+    ],
+    "repository": {
+        "type": "git",
+         "url": "https://github.com/earlephilhower/ESP8266FastROMFS"
+    },
+    "version": "1.0",
+    "homepage": "https://github.com/earlephilhower/ESP8266FastROMFS",
+    "frameworks": "Arduino",
+    "examples": [
+        "examples/*/*.ino"
+    ]
+}

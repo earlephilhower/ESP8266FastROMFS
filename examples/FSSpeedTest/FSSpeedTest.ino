@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESP8266FastROMFS.h>
+#include <FS.h> // SPIFFS
 
 #define TESTSIZEKB 512
 
