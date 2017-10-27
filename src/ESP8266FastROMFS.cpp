@@ -246,7 +246,7 @@ void FastROMFilesystem::DumpSector(int sector)
   ReadSector(sector, buff);
   for (int i = 0; i < SECTORSIZE; i++)
     DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", buff[i]);
-  delete buff;
+  delete[] buff;
 #else
   for (int i = 0; i < SECTORSIZE; i++)
     DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", flash[sector][i]);
@@ -551,7 +551,8 @@ bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, in
   void *simpledata = (void*)malloc(len);
   memcpy(simpledata, &flash[sector][offset], len);
   if (memcmp(simpledata, data, len))
-    DEBUG_FASTROMFS("ERROR!\n");
+    DEBUG_FASTROMFS("ERROR!  Misaligned read data doesn't match correct\n");
+  free(simpledata);
 #endif
   return true;
 }
