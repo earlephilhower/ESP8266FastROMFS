@@ -202,6 +202,8 @@ FastROMFilesystem::FastROMFilesystem()
   baseSector = baseAddr / SECTORSIZE;
   totalSectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
 
+  DEBUG_FASTROMFS("baseAddr=%08x, baseSector=%ld, totalSectors=%ld\n", baseAddr, baseSector, totalSectors);
+
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
   for (int i = 0; i < FATENTRIES; i++) flashErased[i] = false;
@@ -219,12 +221,15 @@ FastROMFilesystem::~FastROMFilesystem()
 
 void FastROMFilesystem::DumpFS()
 {
-  DEBUG_FASTROMFS("fs.epoch = %ld\n, fs.sectors = %ld\n", fs.epoch, fs.sectors);
+  DEBUG_FASTROMFS("fs.epoch = %ld; fs.sectors = %ld\n", fs.epoch, fs.sectors);
   
   DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
     if (fs.fileEntry[i].name[0]) {
-      DEBUG_FASTROMFS("%32s - %5d - %5d\n", fs.fileEntry[i].name, fs.fileEntry[i].len, fs.fileEntry[i].fat);
+      char nm[NAMELEN+1];
+      memcpy(nm, fs.fileEntry[i].name, NAMELEN);
+      nm[NAMELEN] = 0;
+      DEBUG_FASTROMFS("%32s - %5d - %5d\n", nm, fs.fileEntry[i].len, fs.fileEntry[i].fat);
     }
   }
   for (int i = 0; i < fs.sectors; i++) {
@@ -235,13 +240,18 @@ void FastROMFilesystem::DumpFS()
 
 void FastROMFilesystem::DumpSector(int sector)
 {
-#ifdef ARDUINO
-  (void)sector;
-#else
   DEBUG_FASTROMFS("Sector: %d", sector);
-  for (int i = 0; i < SECTORSIZE; i++) DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", flash[sector][i]);
-  DEBUG_FASTROMFS("\n");
+#ifdef ARDUINO
+  uint8_t *buff = new uint8_t[SECTORSIZE];
+  ReadSector(sector, buff);
+  for (int i = 0; i < SECTORSIZE; i++)
+    DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", buff[i]);
+  delete buff;
+#else
+  for (int i = 0; i < SECTORSIZE; i++)
+    DEBUG_FASTROMFS("%s%02x ", (i % 32) == 0 ? "\n" : "", flash[sector][i]);
 #endif
+  DEBUG_FASTROMFS("\n");
 }
 
 int FastROMFilesystem::available()
@@ -295,7 +305,7 @@ int FastROMFilesystem::FindOldestFAT()
 // Scan the FS and return index of latest epoch
 int FastROMFilesystem::FindNewestFAT()
 {
-  int newIdx = 0;
+  int newIdx = -1;
   int64_t newEpoch = 0;
   for (int i = 0; i < FATCOPIES; i++) {
     uint64_t space[2]; // hold magic and epoch
@@ -571,17 +581,22 @@ bool FastROMFilesystem::mkfs()
 
 bool FastROMFilesystem::mount()
 {
-  if (fsIsMounted) return false;
   DEBUG_FASTROMFS("mount()\n");
+  if (fsIsMounted) return false;
+  fs.sectors = totalSectors; // We can potentially read up to this many sectors...
   int idx = FindNewestFAT();
   if (idx >= 0) {
+    DEBUG_FASTROMFS("FAT is located at sector %d\n", idx);
+    DumpSector(idx);
     if (!ReadSector(idx, &fs)) return false;
     if (!ValidateFAT()) return false;
     fsIsDirty = false;
     fsIsMounted = true;
     return true;
+  } else {
+    DEBUG_FASTROMFS("ERROR!!! FAT NOT FOUND!\n");
+    return false;
   }
-  return false;
 }
 
 bool FastROMFilesystem::umount()

@@ -23,7 +23,7 @@
 
 // Enable debugging set to 1
 #ifndef DEBUGFASTROMFS
-  #define DEBUGFASTROMFS 0
+  #define DEBUGFASTROMFS 1
 #endif
 
 // Constants that define filesystem structure
