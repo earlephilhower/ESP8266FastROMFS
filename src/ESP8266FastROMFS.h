@@ -209,7 +209,7 @@ class FastROMFile
   private:
     // Like matter, mere mortals can neither create nor destroy this..only the FastROMFilesystem has that power
     FastROMFile(FastROMFilesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append, bool eraseFirstSector);
-    ~FastROMFile();
+    virtual ~FastROMFile();
     
     FastROMFilesystem *fs; // Where do I live?
     int fileIdx; // Which entry

@@ -200,7 +200,7 @@ FastROMFilesystem::FastROMFilesystem()
   baseSector = baseAddr / SECTORSIZE;
   totalSectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
 
-  DEBUG_FASTROMFS("baseAddr=%08x, baseSector=%ld, totalSectors=%ld\n", baseAddr, baseSector, totalSectors);
+  DEBUG_FASTROMFS("baseAddr=%08lx, baseSector=%ld, totalSectors=%ld\n", (long)baseAddr, (long)baseSector, (long)totalSectors);
 
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
@@ -218,7 +218,7 @@ FastROMFilesystem::FastROMFilesystem(int sectors)
   baseSector = baseAddr / SECTORSIZE;
   totalSectors = sectors;
 
-  DEBUG_FASTROMFS("baseAddr=%08x, baseSector=%ld, totalSectors=%ld\n", baseAddr, baseSector, totalSectors);
+  DEBUG_FASTROMFS("baseAddr=%08lx, baseSector=%ld, totalSectors=%ld\n", (long)baseAddr, (long)baseSector, (long)totalSectors);
 
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
