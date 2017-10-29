@@ -238,7 +238,7 @@ FastROMFilesystem::~FastROMFilesystem()
 
 void FastROMFilesystem::DumpFS()
 {
-  DEBUG_FASTROMFS("fs.epoch = %ld; fs.sectors = %ld\n", fs.epoch, fs.sectors);
+  DEBUG_FASTROMFS("fs.epoch = %ld; fs.sectors = %ld\n", (long)fs.epoch, (long)fs.sectors);
   
   DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
@@ -820,7 +820,7 @@ size_t FastROMFile::write(const uint8_t *out, size_t size)
 
   // We're in the correct sector.  Start writing and extending/overwriting
   while (size) {
-    int amountWritableInThisSector = min(size, SECTORSIZE - (writePos % SECTORSIZE));
+    int amountWritableInThisSector = min((int)size, (int)(SECTORSIZE - (writePos % SECTORSIZE)));
     if (writePos >= curWriteSectorOffset + SECTORSIZE) amountWritableInThisSector = 0;
     if (amountWritableInThisSector == 0) {
       if (dataDirty) { // need to flush this sector
