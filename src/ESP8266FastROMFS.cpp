@@ -588,7 +588,6 @@ bool FastROMFilesystem::mount()
   int idx = FindNewestFAT();
   if (idx >= 0) {
     DEBUG_FASTROMFS("FAT is located at sector %d\n", idx);
-    DumpSector(idx);
     if (!ReadSector(idx, &fs)) return false;
     if (!ValidateFAT()) return false;
     fsIsDirty = false;
@@ -755,9 +754,12 @@ size_t FastROMFile::write(const uint8_t *out, size_t size)
     // Traverse the FAT table, optionally extending the file
     curWriteSector = fs->GetFileEntryFAT(fileIdx);
     curWriteSectorOffset = 0;
+    int lastSector = -1; // Used to update file links
     while (! ( (curWriteSectorOffset <= writePos) && ((curWriteSectorOffset + SECTORSIZE) > writePos) ) ) {
+      lastSector = curWriteSector;
       if (fs->GetFAT(curWriteSector) == FATEOF) { // Need to extend
         int newSector = fs->FindFreeSector();
+        if (newSector < 0) return 0; // Out of space
         fs->SetFAT(curWriteSector, newSector);
         fs->SetFAT(newSector, FATEOF);
         curWriteSector = newSector;
@@ -771,6 +773,24 @@ size_t FastROMFile::write(const uint8_t *out, size_t size)
     }
     if (fs->GetFileEntryLen(fileIdx) > curWriteSectorOffset) { // Read in old data
       if (!fs->ReadSector(curWriteSector, data)) return 0;
+      // Try and allocate a new sector to write the updated data, update the FAT links
+      int newSector = fs->FindFreeSector();
+      if (newSector > 0) {
+        if (lastSector==-1) {
+          int nextSector = fs->GetFAT(fs->GetFileEntryFAT(fileIdx));
+          fs->SetFileEntryFAT(fileIdx, newSector);
+          fs->SetFAT(newSector, nextSector);
+        } else {
+          int nextSector = fs->GetFAT(curWriteSector);
+          fs->SetFAT(lastSector, newSector);
+          fs->SetFAT(newSector, nextSector);
+        }
+        dataDirty = true; // We definitely need to rewrite, no matter what happens later on
+        fs->SetFAT(curWriteSector, 0); // Free original block
+        curWriteSector = newSector;
+      } else {
+        // No space, just leave it where it is...
+      }
     } else { // New sector...
       memset(data, 0, SECTORSIZE);
     }
