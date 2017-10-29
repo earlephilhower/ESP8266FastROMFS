@@ -631,7 +631,7 @@ bool FastROMFilesystem::FlushFAT()
 FastROMFile *FastROMFilesystem::open(const char *name, const char *mode)
 {
   if (!fsIsMounted) return NULL;
-  if (!name || !mode) return NULL;
+  if (!name || !mode || !name[0] || !mode[0]) return NULL;
 
   DEBUG_FASTROMFS("open('%s', '%s')\n", name, mode);
   if (!strcmp(mode, "r") || !strcmp(mode, "rb")) { //  Open text file for reading.  The stream is positioned at the beginning of the file.
@@ -645,20 +645,24 @@ FastROMFile *FastROMFilesystem::open(const char *name, const char *mode)
   } else if (!strcmp(mode, "w") || !strcmp(mode, "wb")) { // Truncate file to zero length or create text file for writing.  The stream is positioned at the beginning of the file.
     unlink(name); // ignore failure, may not exist
     int fidx = CreateNewFileEntry(name);
+    if (fidx < 0) return NULL; // No directory space left
     return new FastROMFile(this, fidx, 0, 0, false, true, false, true);
   } else if (!strcmp(mode, "w+") || !strcmp(mode, "w+b")) { // Open for reading and writing.  The file is created if it does not exist, otherwise it is truncated.  The stream is positioned at the beginning of the file.
     unlink(name); // ignore failure, may not exist
     int fidx = CreateNewFileEntry(name);
+    if (fidx < 0) return NULL; // No directory space left
     return new FastROMFile(this, fidx, 0, 0, true, true, false, true);
   } else if (!strcmp(mode, "a") || !strcmp(mode, "ab")) { // Open for appending (writing at end of file).  The file is created if it does not exist.  The stream is positioned at the end of the file.
     int fidx = FindFileEntryByName(name);
     int sfidx = fidx;
     if (fidx < 0) fidx = CreateNewFileEntry(name);
+    if (fidx < 0) return NULL; // No directory space left
     return new FastROMFile(this, fidx, 0, fs.fileEntry[fidx].len, false, true, true, sfidx < 0 ? true : false);
   } else if (!strcmp(mode, "a+") || !strcmp(mode, "a+b")) { // Open for reading and appending (writing at end of file).  The file is created if it does not exist.  The initial file position for reading is at the beginning of the file, but output is always appended to the end of the file.
     int fidx = FindFileEntryByName(name);
     int sfidx = fidx;
     if (fidx < 0) fidx = CreateNewFileEntry(name);
+    if (fidx < 0) return NULL; // No directory space left
     return new FastROMFile(this, fidx, 0, fs.fileEntry[fidx].len, true, true, true, sfidx < 0 ? true : false);
   }
   return NULL;
