@@ -109,16 +109,14 @@ void FastROMFilesystem::SetFileEntryFAT(int idx, int fat)
 void FastROMFilesystem::DumpToFile(FILE *f)
 {
   if (fsIsMounted) return; // Can't dump a mounted FS!
-  for (size_t i=0; i<totalSectors; i++)
+  for (int i=0; i < fs.sectors; i++)
     fwrite(flash[i], SECTORSIZE, 1, f);
 }
 
 void FastROMFilesystem::LoadFromFile(FILE *f)
 {
   if (fsIsMounted) return;
-  fread(flash[0], SECTORSIZE, 1, f);
-  memcpy(&fs, flash[0], SECTORSIZE);
-  for (size_t i=1; i<fs.sectors; i++)
+  for (size_t i=0; i<MAXFATENTRIES; i++)
     fread(flash[i], SECTORSIZE, 1, f);
 }
 #endif
@@ -206,12 +204,31 @@ FastROMFilesystem::FastROMFilesystem()
 
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
-  for (int i = 0; i < FATENTRIES; i++) flashErased[i] = false;
-  totalSectors = FATENTRIES;
+  for (int i = 0; i < MAXFATENTRIES; i++) flashErased[i] = false;
+  totalSectors = MAXFATENTRIES;
 #endif
   fsIsDirty = false;
   fsIsMounted = false;
 }
+
+FastROMFilesystem::FastROMFilesystem(int sectors)
+{
+#ifdef ARDUINO
+  baseAddr = ((uint32_t) (&_SPIFFS_start) - 0x40200000); // Magic constants taken from SPIFF_API.cpp
+  baseSector = baseAddr / SECTORSIZE;
+  totalSectors = sectors;
+
+  DEBUG_FASTROMFS("baseAddr=%08x, baseSector=%ld, totalSectors=%ld\n", baseAddr, baseSector, totalSectors);
+
+  lastFlashSector = -1; // Invalidate the 1-word cache
+#else
+  for (int i = 0; i < MAXFATENTRIES; i++) flashErased[i] = false;
+  totalSectors = sectors;
+#endif
+  fsIsDirty = false;
+  fsIsMounted = false;
+}
+
 
 FastROMFilesystem::~FastROMFilesystem()
 {

@@ -1,9 +1,9 @@
 
-all: makefsimage lsfsimage copytofsimage copyfromfsimage
+all: mkfastromfs lsfsimage copytofsimage copyfromfsimage
 
 
-makefsimage: makefsimage.cpp ../src/ESP8266FastROMFS.cpp ../src/ESP8266FastROMFS.h
-	g++ -g -Wall -o makefsimage -DDEBUGFASTROMFS=0 makefsimage.cpp ../src/ESP8266FastROMFS.cpp -I ../src
+mkfastromfs: mkfastromfs.cpp ../src/ESP8266FastROMFS.cpp ../src/ESP8266FastROMFS.h
+	g++ -g -Wall -o mkfastromfs -DDEBUGFASTROMFS=0 mkfastromfs.cpp ../src/ESP8266FastROMFS.cpp -I ../src
 
 lsfsimage: lsfsimage.cpp ../src/ESP8266FastROMFS.cpp ../src/ESP8266FastROMFS.h
 	g++ -g -Wall -o lsfsimage -DDEBUGFASTROMFS=0 lsfsimage.cpp ../src/ESP8266FastROMFS.cpp -I ../src

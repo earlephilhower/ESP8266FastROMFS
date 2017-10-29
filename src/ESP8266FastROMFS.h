@@ -29,14 +29,11 @@
 // Constants that define filesystem structure
 #define FSMAGIC 0xdead0beef0f00dll
 #define SECTORSIZE 4096
-//#define FSSIZEMB 3
-//#define FATENTRIES (FSSIZEMB * 1024 * 1024 / 4096)
-//#define FATBYTES ((FATENTRIES * 12) / 8)
-//#define FILEENTRIES ((int)((SECTORSIZE - (sizeof(uint64_t) + sizeof(uint64_t) + FATBYTES + sizeof(uint32_t)))/sizeof(FileEntry)))
 #define FILEENTRIES 64
 #define FATEOF 0xfff
 #define FATCOPIES 8
 #define NAMELEN 24
+#define MAXFATENTRIES 1024
 
 
 
@@ -67,15 +64,9 @@ typedef union {
     int32_t sectors; // How many sectors in the filesystem, including this one!
     uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
     FileEntry fileEntry[ FILEENTRIES ];
-    // fat[] is defined as 1-byte here, but in reality it's from 0...sectors as defined above
-    uint8_t fat[ 1/*FATBYTES*/ ]; // 12-bit packed, use accessors to get in here!  
+    uint8_t fat[ (MAXFATENTRIES * 12) / 8 ]; // 12-bit packed, use accessors to get in here!  
   };
 } FilesystemInFlash;
-
-#ifndef ARDUINO
-//TODO - this should be dynamic in the uploader
-#define FATENTRIES 700
-#endif
 
 
 class FastROMFilesystem
@@ -83,6 +74,7 @@ class FastROMFilesystem
     friend FastROMFile;
   public:
     FastROMFilesystem();
+    FastROMFilesystem(int sectors);
     ~FastROMFilesystem();
     bool mkfs();
     bool mount();
@@ -149,8 +141,8 @@ class FastROMFilesystem
     uint32_t lastFlashSectorData;
 
 #else
-    uint8_t flash[FATENTRIES][SECTORSIZE];
-    bool flashErased[FATENTRIES];
+    uint8_t flash[MAXFATENTRIES][SECTORSIZE];
+    bool flashErased[MAXFATENTRIES];
 #endif
 };
 
