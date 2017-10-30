@@ -23,7 +23,7 @@
 
 // Enable debugging set to 1
 #ifndef DEBUGFASTROMFS
-  #define DEBUGFASTROMFS 1
+  #define DEBUGFASTROMFS 0
 #endif
 
 // Constants that define filesystem structure
@@ -123,6 +123,8 @@ class FastROMFilesystem
     int FindOldestFAT();
     int FindNewestFAT();
     bool ValidateFAT();
+    void CRC32(const void *data, size_t n_bytes, uint32_t* crc);
+
 
   private:
     FilesystemInFlash fs;
