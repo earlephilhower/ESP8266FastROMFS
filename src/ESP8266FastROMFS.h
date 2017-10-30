@@ -27,7 +27,7 @@
 #endif
 
 // Constants that define filesystem structure
-#define FSMAGIC 0xdead0beef0f00dll
+#define FSMAGIC 0xdead0beef0f00dl
 #define SECTORSIZE 4096
 #define FILEENTRIES 64
 #define FATEOF 0xfff
@@ -65,13 +65,13 @@ typedef union {
     uint32_t crc; // CRC32 over the complete entry (replace with 0 before calc'ing)
     FileEntry fileEntry[ FILEENTRIES ];
     uint8_t fat[ (MAXFATENTRIES * 12) / 8 ]; // 12-bit packed, use accessors to get in here!  
-  };
+  } md; // MetaData
 } FilesystemInFlash;
 
 
 class FastROMFilesystem
 {
-    friend FastROMFile;
+    friend class FastROMFile;
   public:
     FastROMFilesystem();
     FastROMFilesystem(int sectors);
@@ -156,7 +156,7 @@ class FastROMFile : public Stream
 class FastROMFile
 #endif
 {
-    friend FastROMFilesystem;
+    friend class FastROMFilesystem;
 
   public:
     size_t write(const uint8_t *out, size_t size) override;

@@ -72,35 +72,35 @@ bool FastROMFilesystem::rename(const char *old, const char *newName)
 
 void FastROMFilesystem::GetFileEntryName(int idx, char *dest)
 {
-  memcpy(dest, fs.fileEntry[idx].name, NAMELEN);
+  memcpy(dest, fs.md.fileEntry[idx].name, NAMELEN);
 }
 
 int FastROMFilesystem::GetFileEntryLen(int idx)
 {
-  return fs.fileEntry[idx].len;
+  return fs.md.fileEntry[idx].len;
 }
 
 int FastROMFilesystem::GetFileEntryFAT(int idx)
 {
-  return fs.fileEntry[idx].fat;
+  return fs.md.fileEntry[idx].fat;
 }
 
 void FastROMFilesystem::SetFileEntryName(int idx, const char *src)
 {
-  strncpy(fs.fileEntry[idx].name, src, NAMELEN);
+  strncpy(fs.md.fileEntry[idx].name, src, NAMELEN);
   fsIsDirty = true;
 }
 
 void FastROMFilesystem::SetFileEntryLen(int idx, int len)
 {
-  fs.fileEntry[idx].len = len;
+  fs.md.fileEntry[idx].len = len;
   fsIsDirty = true;
 }
 
 
 void FastROMFilesystem::SetFileEntryFAT(int idx, int fat)
 {
-  fs.fileEntry[idx].fat = fat;
+  fs.md.fileEntry[idx].fat = fat;
   fsIsDirty = true;
 }
 
@@ -108,7 +108,7 @@ void FastROMFilesystem::SetFileEntryFAT(int idx, int fat)
 void FastROMFilesystem::DumpToFile(FILE *f)
 {
   if (fsIsMounted) return; // Can't dump a mounted FS!
-  for (int i=0; i < fs.sectors; i++)
+  for (int i=0; i < fs.md.sectors; i++)
     fwrite(flash[i], SECTORSIZE, 1, f);
 }
 
@@ -250,18 +250,18 @@ FastROMFilesystem::~FastROMFilesystem()
 
 void FastROMFilesystem::DumpFS()
 {
-  DEBUG_FASTROMFS("fs.epoch = %ld; fs.sectors = %ld\n", (long)fs.epoch, (long)fs.sectors);
+  DEBUG_FASTROMFS("fs.epoch = %ld; fs.sectors = %ld\n", (long)fs.md.epoch, (long)fs.md.sectors);
   
   DEBUG_FASTROMFS("%-32s - %-5s - %-5s\n", "name", "len", "fat");
   for (int i = 0; i < FILEENTRIES; i++) {
-    if (fs.fileEntry[i].name[0]) {
+    if (fs.md.fileEntry[i].name[0]) {
       char nm[NAMELEN+1];
-      memcpy(nm, fs.fileEntry[i].name, NAMELEN);
+      memcpy(nm, fs.md.fileEntry[i].name, NAMELEN);
       nm[NAMELEN] = 0;
-      DEBUG_FASTROMFS("%32s - %5d - %5d\n", nm, fs.fileEntry[i].len, fs.fileEntry[i].fat);
+      DEBUG_FASTROMFS("%32s - %5d - %5d\n", nm, fs.md.fileEntry[i].len, fs.md.fileEntry[i].fat);
     }
   }
-  for (int i = 0; i < fs.sectors; i++) {
+  for (int i = 0; i < fs.md.sectors; i++) {
     DEBUG_FASTROMFS("%s%5d:%-5d ", 0 == (i % 8) ? "\n" : "", i, GetFAT(i));
   }
   DEBUG_FASTROMFS("\n\n");
@@ -287,7 +287,7 @@ int FastROMFilesystem::available()
 {
   if (!fsIsMounted) return false;
   int avail = 0;
-  for (int i = 0; i < fs.sectors; i++) {
+  for (int i = 0; i < fs.md.sectors; i++) {
     if (GetFAT(i) == 0) avail += SECTORSIZE;
   }
   return avail;
@@ -303,10 +303,10 @@ int FastROMFilesystem::fsize(const char *name)
 
 bool FastROMFilesystem::ValidateFAT()
 {
-  if (fs.magic != FSMAGIC) return false;
-  uint32_t savedCRC = fs.crc;
+  if (fs.md.magic != FSMAGIC) return false;
+  uint32_t savedCRC = fs.md.crc;
   uint32_t calcCRC = 0;
-  fs.crc = 0;
+  fs.md.crc = 0;
   CRC32((void*)&fs, sizeof(fs), &calcCRC);
   if (savedCRC != calcCRC) return false; // Something baaaad here!
   return true;
@@ -315,7 +315,7 @@ bool FastROMFilesystem::ValidateFAT()
 int FastROMFilesystem::FindOldestFAT()
 {
   int oldIdx = 0;
-  int64_t oldEpoch = 1LL << 62;
+  int64_t oldEpoch = 1L << 62;
   for (int i = 0; i < FATCOPIES; i++) {
     uint64_t space[2]; // hold magic and epoch only
     ReadPartialSector(i, 0, space, sizeof(space));
@@ -353,7 +353,7 @@ int FastROMFilesystem::FindFileEntryByName(const char *name)
   if (!name) return -1;
 
   for (int i = 0; i < FILEENTRIES; i++) {
-    if (!strncmp(fs.fileEntry[i].name, name, sizeof(fs.fileEntry[i].name))) return i;
+    if (!strncmp(fs.md.fileEntry[i].name, name, sizeof(fs.md.fileEntry[i].name))) return i;
   }
   return -1;
 }
@@ -361,7 +361,7 @@ int FastROMFilesystem::FindFileEntryByName(const char *name)
 int FastROMFilesystem::FindFreeFileEntry()
 {
   for (int i = 0; i < FILEENTRIES; i++) {
-    if (fs.fileEntry[i].name[0] == 0) return i;
+    if (fs.md.fileEntry[i].name[0] == 0) return i;
   }
   return -1; // No space
 }
@@ -371,9 +371,9 @@ int FastROMFilesystem::CreateNewFileEntry(const char *name)
   int idx = FindFreeFileEntry();
   int sec = FindFreeSector();
   if ((idx < 0) || (sec < 0)) return -1;
-  strncpy(fs.fileEntry[idx].name, name, sizeof(fs.fileEntry[idx].name));
-  fs.fileEntry[idx].fat = sec;
-  fs.fileEntry[idx].len = 0;
+  strncpy(fs.md.fileEntry[idx].name, name, sizeof(fs.md.fileEntry[idx].name));
+  fs.md.fileEntry[idx].fat = sec;
+  fs.md.fileEntry[idx].len = 0;
   fsIsDirty = true;
   SetFAT(sec, FATEOF);
   if (!FlushFAT()) return -1;
@@ -386,50 +386,50 @@ bool FastROMFilesystem::unlink(const char *name)
   DEBUG_FASTROMFS("unlink('%s')\n", name);
   int idx = FindFileEntryByName(name);
   if (idx < 0) return false;
-  int sec = fs.fileEntry[idx].fat;
+  int sec = fs.md.fileEntry[idx].fat;
   while (GetFAT(sec) != FATEOF) {
     int nextSec = GetFAT(sec);
     SetFAT(sec, 0);
     sec = nextSec;
   }
   SetFAT(sec, 0);
-  fs.fileEntry[idx].name[0] = 0;
-  fs.fileEntry[idx].len = 0;
-  fs.fileEntry[idx].fat = 0;
+  fs.md.fileEntry[idx].name[0] = 0;
+  fs.md.fileEntry[idx].len = 0;
+  fs.md.fileEntry[idx].fat = 0;
   return FlushFAT();
 }
 
 int FastROMFilesystem::GetFAT(int idx)
 {
-  if ((idx < 0) || (idx >= fs.sectors)) return -1;
+  if ((idx < 0) || (idx >= fs.md.sectors)) return -1;
 
   int bo = (idx / 2) * 3;
   int ret;
   if (idx & 1) {
-    ret = fs.fat[bo + 1] & 0x0f;
+    ret = fs.md.fat[bo + 1] & 0x0f;
     ret <<= 8;
-    ret |= fs.fat[bo + 2];
+    ret |= fs.md.fat[bo + 2];
   } else {
-    ret = fs.fat[bo + 1] & 0xf0;
+    ret = fs.md.fat[bo + 1] & 0xf0;
     ret <<= 4;
-    ret |= fs.fat[bo];
+    ret |= fs.md.fat[bo];
   }
   return ret;
 }
 
 void FastROMFilesystem::SetFAT(int idx, int val)
 {
-  if ((idx < 0) || (idx >= fs.sectors)) return;
+  if ((idx < 0) || (idx >= fs.md.sectors)) return;
 
   int bo = (idx / 2) * 3;
   if (idx & 1) {
-    fs.fat[bo + 1] &= ~0x0f;
-    fs.fat[bo + 1] |= (val >> 8) & 0x0f;
-    fs.fat[bo + 2] = val & 0xff;
+    fs.md.fat[bo + 1] &= ~0x0f;
+    fs.md.fat[bo + 1] |= (val >> 8) & 0x0f;
+    fs.md.fat[bo + 2] = val & 0xff;
   } else {
-    fs.fat[bo + 1] &= ~0xf0;
-    fs.fat[bo + 1] |= (val >> 4) & 0xf0;
-    fs.fat[bo] = val & 0xff;
+    fs.md.fat[bo + 1] &= ~0xf0;
+    fs.md.fat[bo + 1] |= (val >> 4) & 0xf0;
+    fs.md.fat[bo] = val & 0xff;
   }
 
   fsIsDirty = true;
@@ -437,8 +437,8 @@ void FastROMFilesystem::SetFAT(int idx, int val)
 
 int FastROMFilesystem::FindFreeSector()
 {
-  int a = rand() % fs.sectors;
-  for (int i = 0; (i < fs.sectors) && (GetFAT(a) != 0);  i++, a = (a + 1) % fs.sectors) {
+  int a = rand() % fs.md.sectors;
+  for (int i = 0; (i < fs.md.sectors) && (GetFAT(a) != 0);  i++, a = (a + 1) % fs.md.sectors) {
     /*empty*/
   }
   if (GetFAT(a) != 0) return -1;
@@ -448,7 +448,7 @@ int FastROMFilesystem::FindFreeSector()
 
 bool FastROMFilesystem::EraseSector(int sector)
 {
-  if ((sector < 0) || (sector >= fs.sectors)) return false;
+  if ((sector < 0) || (sector >= fs.md.sectors)) return false;
 
   DEBUG_FASTROMFS("EraseSector(%d)\n", sector);
 #ifdef ARDUINO
@@ -467,7 +467,7 @@ bool FastROMFilesystem::WriteSector(int sector, const void *data)
 {
   DEBUG_FASTROMFS("WriteSector(%d, data)\n", sector);
 
-  if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
+  if ((sector < 0) || (sector >= fs.md.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 #ifdef ARDUINO
@@ -489,7 +489,7 @@ bool FastROMFilesystem::WriteSector(int sector, const void *data)
 
 bool FastROMFilesystem::ReadSector(int sector, void *data)
 {
-  if ((sector < 0) || (sector >= fs.sectors) || !data) return false;
+  if ((sector < 0) || (sector >= fs.md.sectors) || !data) return false;
   if ((const uintptr_t)data % 4) return false; // Need to have 32-bit aligned inputs!
 
 #ifdef ARDUINO
@@ -502,7 +502,7 @@ bool FastROMFilesystem::ReadSector(int sector, void *data)
 
 bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, int len)
 {
-  if ((sector < 0) || (sector >= fs.sectors) || !data || (len < 0) || (offset < 0) || (offset + len > SECTORSIZE)) return false;
+  if ((sector < 0) || (sector >= fs.md.sectors) || !data || (len < 0) || (offset < 0) || (offset + len > SECTORSIZE)) return false;
 
   // Easy case, everything is aligned and we can just do it...
   if ( ((offset % 4) == 0) && ((len % 4) == 0) && (((const uintptr_t)data % 4) == 0) ) {
@@ -590,9 +590,9 @@ bool FastROMFilesystem::mkfs()
 {
   if (fsIsMounted) return false;
   memset(&fs, 0, sizeof(fs));
-  fs.magic = FSMAGIC;
-  fs.epoch = 1;
-  fs.sectors = totalSectors;
+  fs.md.magic = FSMAGIC;
+  fs.md.epoch = 1;
+  fs.md.sectors = totalSectors;
   for (int i = 0; i < FATCOPIES; i++) {
     SetFAT(i, FATEOF);
   }
@@ -613,7 +613,7 @@ bool FastROMFilesystem::mount()
 {
   DEBUG_FASTROMFS("mount()\n");
   if (fsIsMounted) return false;
-  fs.sectors = totalSectors; // We can potentially read up to this many sectors...
+  fs.md.sectors = totalSectors; // We can potentially read up to this many sectors...
   int idx = FindNewestFAT();
   if (idx >= 0) {
     DEBUG_FASTROMFS("FAT is located at sector %d\n", idx);
@@ -642,11 +642,11 @@ bool FastROMFilesystem::FlushFAT()
   DEBUG_FASTROMFS("FlushFAT(), ismounted=%d, isdirty=%d\n", !!fsIsMounted, !!fsIsDirty);
   if (!fsIsMounted || !fsIsDirty) return true; // Nothing to do here...
 
-  fs.epoch++;
-  fs.crc = 0;
+  fs.md.epoch++;
+  fs.md.crc = 0;
   uint32_t calcCRC = 0;
   CRC32((void*)&fs, sizeof(fs), &calcCRC);
-  fs.crc = calcCRC;
+  fs.md.crc = calcCRC;
   int idx = FindOldestFAT();
   if (idx >= 0) {
     if (!EraseSector(idx)) return false;
@@ -686,13 +686,13 @@ FastROMFile *FastROMFilesystem::open(const char *name, const char *mode)
     int sfidx = fidx;
     if (fidx < 0) fidx = CreateNewFileEntry(name);
     if (fidx < 0) return NULL; // No directory space left
-    return new FastROMFile(this, fidx, 0, fs.fileEntry[fidx].len, false, true, true, sfidx < 0 ? true : false);
+    return new FastROMFile(this, fidx, 0, fs.md.fileEntry[fidx].len, false, true, true, sfidx < 0 ? true : false);
   } else if (!strcmp(mode, "a+") || !strcmp(mode, "a+b")) { // Open for reading and appending (writing at end of file).  The file is created if it does not exist.  The initial file position for reading is at the beginning of the file, but output is always appended to the end of the file.
     int fidx = FindFileEntryByName(name);
     int sfidx = fidx;
     if (fidx < 0) fidx = CreateNewFileEntry(name);
     if (fidx < 0) return NULL; // No directory space left
-    return new FastROMFile(this, fidx, 0, fs.fileEntry[fidx].len, true, true, true, sfidx < 0 ? true : false);
+    return new FastROMFile(this, fidx, 0, fs.md.fileEntry[fidx].len, true, true, true, sfidx < 0 ? true : false);
   }
   return NULL;
 }

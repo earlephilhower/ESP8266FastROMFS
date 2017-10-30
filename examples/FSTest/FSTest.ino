@@ -1,4 +1,12 @@
+#ifdef ARDUINO
 #include <Arduino.h>
+#else
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <time.h>
+#endif
 #include <ESP8266FastROMFS.h>
 
 #ifdef ARDUINO
@@ -200,7 +208,7 @@ int main(int argc, char **argv)
 
 }
 
-
+#ifdef ARDUINO
 void setup()
 {
   Serial.begin(115200);
@@ -211,4 +219,5 @@ void loop()
 {
   /* nop */
 }
+#endif
 
