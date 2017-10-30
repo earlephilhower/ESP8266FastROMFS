@@ -699,11 +699,21 @@ FastROMFile *FastROMFilesystem::open(const char *name, const char *mode)
 
 FastROMFile::~FastROMFile()
 {
+  DEBUG_FASTROMFS("FastROMFile::~FastROMFile\n");
+  if (modeWrite || modeAppend) {
+    if (dataDirty) {
+      fs->EraseSector(curWriteSector);
+      fs->WriteSector(curWriteSector, data);
+    }
+    dataDirty = false;
+  }
   free(data);
+  data = NULL;
 }
 
 FastROMFile::FastROMFile(FastROMFilesystem *fs, int fileIdx, int readOffset, int writeOffset, bool read, bool write, bool append, bool eraseFirstSector)
 {
+  DEBUG_FASTROMFS("FastROMFile::FastROMFile\n");
   this->fs = fs;
   this->modeRead = read;
   this->modeWrite = write;
@@ -870,11 +880,17 @@ size_t FastROMFile::write(const uint8_t *out, size_t size)
 
 int FastROMFile::close()
 {
+  int ret = 0;
   DEBUG_FASTROMFS("close()\n");
-  if (!modeWrite && !modeAppend) return 0;
-  if (!dataDirty) return 0;
-  if (!fs->EraseSector(curWriteSector)) return -1;
-  int ret = fs->WriteSector(curWriteSector, data) ? 0 : -1;
+  if (modeWrite || modeAppend) {
+    if (dataDirty) {
+      if (!fs->EraseSector(curWriteSector)) ret |= -1;
+      else ret |= fs->WriteSector(curWriteSector, data) ? 0 : -1;
+    }
+    dataDirty = false;
+    free(data);
+    data = NULL;
+  }
   delete this;
   return ret;
 }
