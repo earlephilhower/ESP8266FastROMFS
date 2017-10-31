@@ -120,8 +120,6 @@ class FastROMFilesystem
     void SetFileEntryLen(int idx, int len);
     void SetFileEntryFAT(int idx, int fat);
     bool FlushFAT();
-    int FindOldestFAT();
-    int FindNewestFAT();
     bool ValidateFAT();
     void CRC32(const void *data, size_t n_bytes, uint32_t* crc);
 
@@ -131,6 +129,7 @@ class FastROMFilesystem
     bool fsIsMounted;
     bool fsIsDirty;
     uint32_t totalSectors;
+    uint8_t fatSector[FATCOPIES]; // Sorted list with [0] == newest, [FATENTRIES-1] = oldest FAT sector
 #ifdef ARDUINO
     // As-defined at compile-time, but the FS metadata may say something different...
     uint32_t baseAddr;

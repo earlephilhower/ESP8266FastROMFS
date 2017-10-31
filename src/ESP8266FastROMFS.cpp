@@ -312,42 +312,6 @@ bool FastROMFilesystem::ValidateFAT()
   return true;
 }
 
-int FastROMFilesystem::FindOldestFAT()
-{
-  int oldIdx = 0;
-  int64_t oldEpoch = INT64_MAX;
-  for (int i = 0; i < FATCOPIES; i++) {
-    uint64_t space[2]; // hold magic and epoch only
-    ReadPartialSector(i, 0, space, sizeof(space));
-    if (space[0] != FSMAGIC) {
-      // This one is bad, so let's overwrite it!
-      return i;
-    }
-    if ((int64_t)space[1] < oldEpoch) {
-      oldIdx = i;
-      oldEpoch = (int64_t)space[1];
-    }
-  }
-  return oldIdx;
-}
-
-// Scan the FS and return index of latest epoch
-int FastROMFilesystem::FindNewestFAT()
-{
-  int newIdx = -1;
-  int64_t newEpoch = 0;
-  for (int i = 0; i < FATCOPIES; i++) {
-    uint64_t space[2]; // hold magic and epoch
-    ReadPartialSector(i, 0, space, sizeof(space));
-    if (space[0] != FSMAGIC) continue; // Ignore invalid ones
-    if ((int64_t)space[1] > newEpoch) {
-      newIdx = i;
-      newEpoch = (int64_t)space[1];
-    }
-  }
-  return newIdx;
-}
-
 int FastROMFilesystem::FindFileEntryByName(const char *name)
 {
   if (!name) return -1;
@@ -595,6 +559,7 @@ bool FastROMFilesystem::mkfs()
   fs.md.sectors = totalSectors;
   for (int i = 0; i < FATCOPIES; i++) {
     SetFAT(i, FATEOF);
+    fatSector[i] = i;
   }
   for (int i = 0; i < FATCOPIES; i++) {
     if (!EraseSector(i)) return false;
@@ -614,18 +579,49 @@ bool FastROMFilesystem::mount()
   DEBUG_FASTROMFS("mount()\n");
   if (fsIsMounted) return false;
   fs.md.sectors = totalSectors; // We can potentially read up to this many sectors...
-  int idx = FindNewestFAT();
-  if (idx >= 0) {
-    DEBUG_FASTROMFS("FAT is located at sector %d\n", idx);
-    if (!ReadSector(idx, &fs)) return false;
-    if (!ValidateFAT()) return false;
-    fsIsDirty = false;
-    fsIsMounted = true;
-    return true;
-  } else {
-    DEBUG_FASTROMFS("ERROR!!! FAT NOT FOUND!\n");
-    return false;
+
+  // Read all potential FATs, scan for validitiy, then put them in a sorted list newest to oldest
+  uint64_t fatEpoch[FATCOPIES];
+  memset(fatEpoch, 0, sizeof(fatEpoch));
+  for (int i = 0; i < FATCOPIES; i++) {
+    fatSector[i] = i;
+    if (!ReadSector(i, &fs)) {
+      // Error here, set epoch to 0
+      fatEpoch[i] = 0;
+      continue;
+    }
+    if (!ValidateFAT()) {
+      // Error here, set epoch to 0
+      fatEpoch[i] = 0;
+      continue;
+    }
+    fatEpoch[i] = fs.md.epoch;
   }
+  // Sort the list highest epoch(newest) to oldest)
+  // FATENTRIES small, bubble sort is fine
+  for (int i=0; i<FATCOPIES; i++) {
+    for (int j=i+1; j<FATCOPIES; j++) {
+      if (fatEpoch[j] > fatEpoch[i]) {
+        uint64_t x = fatEpoch[j];
+        fatEpoch[j] = fatEpoch[i];
+        fatEpoch[i] = x;
+        uint8_t y = fatSector[j];
+        fatSector[j] = fatSector[i];
+        fatSector[i] = y;
+      }
+    }
+  }
+
+  for (int i=0; i<FATCOPIES; i++)
+    DEBUG_FASTROMFS("fatSector[%d] = %d, epoch = %ld\n", (int)i, (int)fatSector[i], (long)fatEpoch[i]);
+
+  // Read in the newest and continue...
+  if (!ReadSector(fatSector[0], &fs)) return false;
+  if (!ValidateFAT()) return false;
+
+  fsIsDirty = false;
+  fsIsMounted = true;
+  return true;
 }
 
 bool FastROMFilesystem::umount()
@@ -647,14 +643,13 @@ bool FastROMFilesystem::FlushFAT()
   uint32_t calcCRC = 0;
   CRC32((void*)&fs, sizeof(fs), &calcCRC);
   fs.md.crc = calcCRC;
-  int idx = FindOldestFAT();
-  if (idx >= 0) {
-    if (!EraseSector(idx)) return false;
-    bool ret = WriteSector(idx, &fs);
-    if (ret) fsIsDirty = false;
-    return ret;
-  }
-  return false;
+  int idx = fatSector[FATCOPIES-1];
+  memmove(&fatSector[1], &fatSector[0], sizeof(uint8_t)*(FATCOPIES-1));
+  fatSector[0] = idx; // This new one is the newest now...
+  if (!EraseSector(idx)) return false;
+  bool ret = WriteSector(idx, &fs);
+  if (ret) fsIsDirty = false;
+  return ret;
 }
 
 FastROMFile *FastROMFilesystem::open(const char *name, const char *mode)
