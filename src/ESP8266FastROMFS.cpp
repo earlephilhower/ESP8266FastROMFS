@@ -468,7 +468,7 @@ bool FastROMFilesystem::ReadPartialSector(int sector, int offset, void *data, in
     return true;
   }
 
-  memset(data, 0, len); // Clear buffer just for debugging sanity
+//  memset(data, 0, len); // Clear buffer just for debugging sanity
 
   // We're gonna get wordy here for sanity's sake.  This align and shifting is a brain twister.
   uint8_t *destStart = reinterpret_cast<uint8_t*>(data);
