@@ -205,26 +205,16 @@ extern "C" uint32_t _SPIFFS_start;
 extern "C" uint32_t _SPIFFS_end;
 #endif
 
-FastROMFilesystem::FastROMFilesystem()
-{
-#ifdef ARDUINO
-  baseAddr = ((uint32_t) (&_SPIFFS_start) - 0x40200000); // Magic constants taken from SPIFF_API.cpp
-  baseSector = baseAddr / SECTORSIZE;
-  totalSectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
-
-  DEBUG_FASTROMFS("baseAddr=%08lx, baseSector=%ld, totalSectors=%ld\n", (long)baseAddr, (long)baseSector, (long)totalSectors);
-
-  lastFlashSector = -1; // Invalidate the 1-word cache
-#else
-  for (int i = 0; i < MAXFATENTRIES; i++) flashErased[i] = false;
-  totalSectors = MAXFATENTRIES;
-#endif
-  fsIsDirty = false;
-  fsIsMounted = false;
-}
-
 FastROMFilesystem::FastROMFilesystem(int sectors)
 {
+  if (sectors == 0) {
+#ifdef ARDUINO
+    sectors = ((uint32_t)&_SPIFFS_end - (uint32_t)&_SPIFFS_start) / SECTORSIZE;
+#else
+    sectors = MAXFATENTRIES;
+#endif
+  }
+
 #ifdef ARDUINO
   baseAddr = ((uint32_t) (&_SPIFFS_start) - 0x40200000); // Magic constants taken from SPIFF_API.cpp
   baseSector = baseAddr / SECTORSIZE;
@@ -234,7 +224,7 @@ FastROMFilesystem::FastROMFilesystem(int sectors)
 
   lastFlashSector = -1; // Invalidate the 1-word cache
 #else
-  for (int i = 0; i < MAXFATENTRIES; i++) flashErased[i] = false;
+  for (int i = 0; i < sectors; i++) flashErased[i] = false;
   totalSectors = sectors;
 #endif
   fsIsDirty = false;

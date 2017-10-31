@@ -73,8 +73,7 @@ class FastROMFilesystem
 {
     friend class FastROMFile;
   public:
-    FastROMFilesystem();
-    FastROMFilesystem(int sectors);
+    FastROMFilesystem(int sectors = 0);
     ~FastROMFilesystem();
     bool mkfs();
     bool mount();
