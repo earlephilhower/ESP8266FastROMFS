@@ -315,7 +315,7 @@ bool FastROMFilesystem::ValidateFAT()
 int FastROMFilesystem::FindOldestFAT()
 {
   int oldIdx = 0;
-  int64_t oldEpoch = 1L << 62;
+  int64_t oldEpoch = INT64_MAX;
   for (int i = 0; i < FATCOPIES; i++) {
     uint64_t space[2]; // hold magic and epoch only
     ReadPartialSector(i, 0, space, sizeof(space));
