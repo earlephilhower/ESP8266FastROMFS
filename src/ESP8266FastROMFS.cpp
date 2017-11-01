@@ -919,7 +919,7 @@ int FastROMFile::read(void *in, int size)
   while (size) {
     int offsetIntoData = readPos % SECTORSIZE; //= pointer into data[]
     int amountReadableInThisSector = min(size, SECTORSIZE - (readPos % SECTORSIZE));
-    if (readPos > curReadSectorOffset + SECTORSIZE) amountReadableInThisSector = 0;
+    if (readPos >= curReadSectorOffset + SECTORSIZE) amountReadableInThisSector = 0;
     if (amountReadableInThisSector == 0) {
       if (curReadSector == FATEOF) { // end
         return readBytes; // Hit EOF...again, should not happen ever
